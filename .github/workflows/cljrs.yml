@@ -1,0 +1,67 @@
+name: cljrs
+
+# Exercises Replicant's pure-data tests under the clojurust (cljrs) interpreter.
+# These tests drive the renderer through the in-memory `replicant.mutation-log`
+# fake (no DOM, no wasm), so they validate the `:rust` reader-conditional target
+# -- reader conditionals, macro expansion, persistent collections and stdlib
+# coverage -- independent of `cljrs.dom`. See doc/cljrs-port/STATUS.md.
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths:
+      - "src/**"
+      - "test/**"
+      - ".github/workflows/cljrs.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - ".github/workflows/cljrs.yml"
+  workflow_dispatch:
+
+env:
+  # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI. Bump this
+  # (and the cache key picks it up automatically) to track newer releases.
+  CLJRS_VERSION: "0.1.195"
+
+jobs:
+  pure-data-tests:
+    if: "!contains(github.event.head_commit.message, 'skip ci')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cljrs binary
+        id: cache-cljrs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cljrs
+          key: cljrs-${{ runner.os }}-${{ runner.arch }}-${{ env.CLJRS_VERSION }}
+
+      - name: Install cljrs
+        if: steps.cache-cljrs.outputs.cache-hit != 'true'
+        run: cargo install cljrs --version "=${{ env.CLJRS_VERSION }}"
+
+      - name: Version
+        run: cljrs --version
+
+      - name: Run pure-data tests
+        # The lib (src) and the tests (test) both go on the source path. The
+        # listed namespaces are the headless, DOM-free suites; render_test.clj
+        # (test.check) and the cljs runner are intentionally excluded.
+        run: |
+          cljrs test \
+            --src-path src \
+            --src-path test \
+            replicant.hiccup-test \
+            replicant.transition-test \
+            replicant.alias-test \
+            replicant.string-test \
+            replicant.core-test

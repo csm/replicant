@@ -86,3 +86,13 @@ confirm:
 
 Then run the no-DOM milestone (pure-data tests via `mutation_log`) before the
 browser/wasm integration test. See `examples/cljrs-wasm/README.md`.
+
+## CI
+
+`.github/workflows/cljrs.yml` automates the no-DOM milestone: it installs
+`cljrs` (pinned via the `CLJRS_VERSION` env) and runs the headless suites
+(`replicant.{hiccup,transition,alias,string,core}-test`) with
+`cljrs test --src-path src --src-path test ...`. This is the cheapest gate for
+the `:rust` target — it shakes out the verification items above without a
+browser. The exact `--src-path` form / namespace-selection flags may need to be
+reconciled with the installed cljrs version's CLI.
