@@ -26,9 +26,10 @@ on:
   workflow_dispatch:
 
 env:
-  # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI. Bump this
-  # (and the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.195"
+  # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI; 0.1.196 adds
+  # reader metadata handling on ns/def names. Bump this (the cache key picks it up
+  # automatically) to track newer releases.
+  CLJRS_VERSION: "0.1.196"
 
 jobs:
   pure-data-tests:
@@ -73,26 +74,27 @@ jobs:
           exit 0
 
       - name: Run pure-data tests (gate)
-        # Suites that load and pass under cljrs today. As upstream cljrs reader
-        # fixes land (see the blocked step below), move namespaces up here.
+        # Suites that load and pass under cljrs today. transition-test is
+        # unblocked as of cljrs 0.1.196 (ns metadata) plus the :rust string-interop
+        # branch in transition.cljc. As more reader fixes land, promote the
+        # namespaces from the blocked step below.
         run: |
           cljrs test \
             --src-path src \
             --src-path test \
-            replicant.hiccup-test
+            replicant.hiccup-test \
+            replicant.transition-test
 
       - name: Run pure-data tests blocked on cljrs reader fixes (informational)
-        # These fail to LOAD due to two confirmed cljrs reader gaps (see the
-        # feature matrix above and doc/cljrs-port/STATUS.md):
-        #   1. reader metadata on ns/def names (e.g. (ns ^:no-doc ...))
-        #   2. auto-gensym symbol# in syntax-quote (e.g. `(let [x# 1] x#))
-        # Tolerant on purpose: surfaces the current error each run and flips to a
-        # real signal once cljrs can read these namespaces.
+        # These still fail to LOAD due to cljrs reader gap #2: auto-gensym
+        # symbol# in syntax-quote (e.g. `(let [x# 1] x#)) -- used by the
+        # macro-heavy files these namespaces require (asserts/hiccup_headers/
+        # alias). See the feature matrix above and doc/cljrs-port/STATUS.md.
+        # Tolerant on purpose: flips to a real signal once cljrs can read them.
         run: |
           cljrs test \
             --src-path src \
             --src-path test \
-            replicant.transition-test \
             replicant.alias-test \
             replicant.string-test \
-            replicant.core-test || echo "(still blocked on cljrs reader fixes)"
+            replicant.core-test || echo "(still blocked on cljrs auto-gensym reader fix)"

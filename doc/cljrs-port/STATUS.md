@@ -94,18 +94,18 @@ precise capability matrix on **cljrs 0.1.195**. Two standard-Clojure reader
 features are missing; both must be fixed in cljrs before the macro-heavy
 namespaces can load. These are upstream cljrs bugs, not replicant issues.
 
-### 1. Reader metadata on `ns` / `def` / `defmacro` names
+### 1. Reader metadata on `ns` / `def` / `defmacro` names — FIXED in cljrs 0.1.196
 
 ```clojure
-(ns ^:no-doc cljrs-probe.ns-meta)          ; → "ns requires a symbol at position 0"
-(defmacro ^{:indent 2} m [x] `(inc ~x))    ; → "defmacro requires a symbol at position 0"
+(ns ^:no-doc cljrs-probe.ns-meta)          ; was: "ns requires a symbol at position 0"
+(defmacro ^{:indent 2} m [x] `(inc ~x))    ; was: "defmacro requires a symbol at position 0"
 ```
 
-`^meta` is not attached to the following symbol, so the special form sees the
-metadata map at position 0. Replicant uses this pervasively
-(`(ns ^:no-doc replicant.core …)`, `(defmacro ^{:indent 2} aliasfn …)`,
-`(def ^:no-doc …)`), so it blocks `transition.cljc`, `alias.cljc`, `core.cljc`,
-`vdom.cljc`, `hiccup_headers.cljc`, and more.
+`^meta` was not attached to the following symbol, so the special form saw the
+metadata map at position 0. **Resolved upstream in cljrs 0.1.196.** This unblocks
+`transition.cljc` (which has no macros); with the `:rust` string-interop branch
+added to `transition.cljc`, `replicant.transition-test` is promoted to the CI
+gate.
 
 ### 2. Auto-gensym `symbol#` in syntax-quote
 
@@ -132,9 +132,12 @@ load and run; the blockers are purely the two reader gaps above.
 
 ### Result
 
-`replicant.hiccup-test` passes under cljrs (2 tests, 6 assertions). The other
-four headless suites fail to *load* solely because of the two reader gaps. Once
-those land in cljrs, re-run and promote them in the workflow.
+`replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1
+fixed) plus the `:rust` branch in `transition.cljc`, `replicant.transition-test`
+is promoted to the gate. `alias-test`, `string-test`, and `core-test` remain
+blocked solely by reader gap #2 (auto-gensym), since they require macro-heavy
+files (`alias.cljc`, `asserts.cljc`, `hiccup_headers.cljc`). Promote them once
+auto-gensym lands.
 
 ## CI
 
