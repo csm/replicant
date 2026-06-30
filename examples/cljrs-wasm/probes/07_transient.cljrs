@@ -1,0 +1,2 @@
+(ns cljrs-probe.transient)
+(println "07 transient:" (persistent! (conj! (transient []) 1 2 3)))

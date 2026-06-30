@@ -1,0 +1,2 @@
+(ns ^:no-doc cljrs-probe.ns-meta)
+(println "01 ns-meta: ok")

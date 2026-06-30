@@ -1,0 +1,3 @@
+(ns cljrs-probe.nested)
+(def v #?(:rust #?(:rust :inner-rust :default :inner-default) :default :outer))
+(println "04 nested-readercond:" v)

@@ -52,6 +52,23 @@ jobs:
       - name: Version
         run: cljrs --version
 
+      - name: cljrs reader/feature probes (diagnostic)
+        # Each probe isolates one language/reader feature the port relies on, so
+        # a failure points at a precise cljrs deficiency to flag upstream (rather
+        # than a terse, masked read error from the full test load). Tolerant:
+        # this step always succeeds; it just prints a PASS/FAIL matrix.
+        run: |
+          echo "cljrs feature matrix:"
+          rc=0
+          for f in examples/cljrs-wasm/probes/*.cljrs; do
+            if out=$(cljrs run "$f" 2>&1); then
+              echo "PASS  $(basename "$f")  -> $out"
+            else
+              echo "FAIL  $(basename "$f")  -> $out"
+            fi
+          done
+          exit 0
+
       - name: Run pure-data tests
         # The lib (src) and the tests (test) both go on the source path. The
         # listed namespaces are the headless, DOM-free suites; render_test.clj

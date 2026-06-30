@@ -1,0 +1,5 @@
+(ns cljrs-probe.js-skip)
+;; The :cljs branch (with a #js tagged literal) must be skippable when :rust is selected.
+(def v #?(:cljs #js [1 2 3] :rust [1 2 3] :default [1 2 3]))
+(def m #?(:cljs #js {:a 1} :rust {:a 1} :default {:a 1}))
+(println "03 js-skip:" v m)

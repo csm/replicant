@@ -1,0 +1,3 @@
+(ns cljrs-probe.unchecked)
+(println "06 unchecked-int:"
+         (unchecked-inc-int 1) (unchecked-add-int 2 3) (unchecked-dec-int 5))

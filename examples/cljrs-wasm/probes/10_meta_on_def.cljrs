@@ -1,0 +1,4 @@
+(ns cljrs-probe.metadef)
+(defmacro ^{:indent 2} mac [x] `(inc ~x))
+(def ^:no-doc y 41)
+(println "10 meta-on-def:" (mac y))
