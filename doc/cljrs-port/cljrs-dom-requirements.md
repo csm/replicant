@@ -234,18 +234,18 @@ needs it. Names are suggestions following the existing cljrs.dom conventions
     references → potential retention), so (a) is preferred. Please confirm which
     guarantee cljrs provides.
 
-## Toolchain gap (not a `cljrs.dom` API, but blocking)
+## Toolchain: library → WASM packaging (landing in cljrs 0.1.194)
 
-There is no documented **library → WASM packaging workflow**. `cljrs compile
-app.cljrs -o app` produces a native binary, and `cljrs-wasm` compiles the *REPL*
-to `wasm32-unknown-unknown`, but there is no documented path to AOT-compile a
-cljrs *library* (Replicant's `.cljc`) plus an application entry point into a
-loadable wasm-bindgen module that mounts a `cljrs.dom` UI in a browser. This is
-needed to ship a Replicant app. Requested:
+Earlier `cljrs` releases had no documented path to package a cljrs *library*
+(Replicant's `.cljc`) plus an application entry point into a loadable
+wasm-bindgen module — `cljrs compile app.cljrs -o app` produced a native binary
+and `cljrs-wasm` only compiled the *REPL* to `wasm32-unknown-unknown`.
 
-- A documented `cljrs` wasm build target / `cljrs.edn` configuration that emits a
-  wasm-bindgen module from a multi-file cljrs project, with `cljrs.dom` available
-  and an exported entry function the host page can call.
+**Resolved upstream:** wasm CLI support and packaging land in **cljrs 0.1.194**
+(published 2026-06-30). The Replicant port targets this version for its build
+step — a multi-file cljrs project compiled to a wasm-bindgen module with
+`cljrs.dom` available and an exported entry function the host page calls. The
+remaining blockers are the `cljrs.dom` API additions listed above.
 
 ## Notes for the eventual Replicant `:rust` backend
 
