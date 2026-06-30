@@ -14,7 +14,9 @@
              ms (or (str/index-of s-str "ms") -1)
              comma (or (str/index-of s-str ",") -1)]
          (if (and (< s 0) (< ms 0))
-           [n (unchecked-int duration)]
+           ;; cljrs has no `unchecked-int`; `int` performs the double->int
+           ;; coercion the result depends on (e.g. 250.0 -> 250).
+           [n (int duration)]
            (recur
             (if (< comma 0)
               ""

@@ -120,6 +120,13 @@ as a dispatch macro. This blocks every syntax-quoting macro — `alias.cljc`
 "map literal must have an even number of forms" cascade when the mis-tokenized
 gensym throws the form count off), `assert.cljc`, `errors.cljc`.
 
+### Minor: `unchecked-int` not bound (cljrs 0.1.196)
+
+`unchecked-inc-int` / `unchecked-add-int` / `unchecked-dec-int` are bound, but the
+plain cast `unchecked-int` is not ("unbound symbol: unchecked-int"). Replicant
+uses it in `transition.cljc`; the `:rust` branch there uses `int` instead (the
+`:clj`/`:cljs` branches keep `unchecked-int`). Low priority to add upstream.
+
 ### Confirmed working on cljrs 0.1.195 (no action needed)
 
 `#js` tagged literals skipped in non-selected reader-conditional branches;

@@ -1,0 +1,7 @@
+(ns cljrs-probe.int-casts)
+;; cljrs has unchecked-inc-int/add-int/dec-int (probe 06) but the plain casts
+;; int / long / unchecked-int are separate; confirm which are bound.
+(println "11 int-casts:"
+         (int 250.0)
+         (long 250.0)
+         (= 250 (int 250.0)))
