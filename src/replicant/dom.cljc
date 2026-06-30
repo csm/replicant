@@ -2,195 +2,355 @@
   (:require [replicant.alias :as alias]
             [replicant.asserts :as asserts]
             [replicant.core :as r]
-            [replicant.env :as env]
             [replicant.errors :as errors]
             [replicant.protocols :as replicant]
-            [replicant.transition :as transition]))
+            [replicant.transition :as transition]
+            ;; replicant.env only ships as .clj/.cljs (it is the cljs-compiler
+            ;; bridge for dev keys), so cljrs cannot load it. The :rust backend
+            ;; skips dev-key injection, so it does not need the namespace.
+            #?(:default [replicant.env :as env])
+            #?(:rust [cljrs.dom :as dom])))
 
-(defn ^:no-doc remove-listener [^js/EventTarget el event opt]
-  (when-let [old-handler (some-> el .-replicantHandlers (aget event))]
-    (.removeEventListener el event old-handler (clj->js opt))))
+#?(:default
+   (defn ^:no-doc remove-listener [^js/EventTarget el event opt]
+     (when-let [old-handler (some-> el .-replicantHandlers (aget event))]
+       (.removeEventListener el event old-handler (clj->js opt)))))
 
 (defn ^:no-doc on-next-frame [f]
-  (js/requestAnimationFrame
-   #(js/requestAnimationFrame f)))
+  #?(:rust (dom/request-animation-frame
+            (fn [] (dom/request-animation-frame f)))
+     :default (js/requestAnimationFrame
+               #(js/requestAnimationFrame f))))
 
-(defn ^:no-doc -on-transition-end [el f]
-  (let [[n dur] (-> (js/window.getComputedStyle el)
-                    (.getPropertyValue "transition-duration")
-                    transition/get-transition-stats)]
-    (if (= n 0)
-      (f)
-      (let [complete (volatile! 0)
-            timer (volatile! nil)
-            started (js/Date.)
-            callback (fn listener [& _args]
-                       (let [cn (vswap! complete inc)]
-                         (when (or (<= n cn)
-                                   (< dur (- (js/Date.) started)))
-                           (.removeEventListener el "transitionend" listener)
-                           (js/clearTimeout @timer)
-                           (f))))]
-        (.addEventListener el "transitionend" callback)
-        ;; The timer is a fail-safe. You could have set transition properties
-        ;; that either don't change, or don't change in a way that triggers an
-        ;; actual transition on unmount (e.g. changing height from auto to 0
-        ;; causes no transition). When this happens, there will not be as many
-        ;; transitionend events as there are transition durations. To avoid
-        ;; getting stuck, the timer will come in and clean up.
-        ;;
-        ;; The timer is set with a hefty delay to avoid cutting a transition
-        ;; short, in the case of a backed up browser working on overtime. Not
-        ;; sure how realistic this is, but better safe than sorry, and the
-        ;; important part is that the element doesn't get stuck forever.
-        (vreset! timer (js/setTimeout callback (+ dur 200)))))))
+#?(:rust
+   (defn ^:no-doc -on-transition-end [el f]
+     ;; cljrs.dom exposes computed-style and listen!/unlisten!, which covers the
+     ;; common case. The browser implementation additionally arms a setTimeout
+     ;; fail-safe for transitions that never actually fire transitionend; cljrs
+     ;; has no timer primitive exposed yet, so that safety net is omitted here.
+     (let [[n _dur] (-> (dom/computed-style el "transition-duration")
+                        transition/get-transition-stats)]
+       (if (= n 0)
+         (f)
+         (let [complete (volatile! 0)
+               handle (volatile! nil)
+               callback (fn listener [& _args]
+                          (when (<= n (vswap! complete inc))
+                            (some-> @handle dom/unlisten!)
+                            (f)))]
+           (vreset! handle (dom/listen! el "transitionend" callback {}))))))
 
-(def ^:no-doc memories (js/WeakMap.))
+   :default
+   (defn ^:no-doc -on-transition-end [el f]
+     (let [[n dur] (-> (js/window.getComputedStyle el)
+                       (.getPropertyValue "transition-duration")
+                       transition/get-transition-stats)]
+       (if (= n 0)
+         (f)
+         (let [complete (volatile! 0)
+               timer (volatile! nil)
+               started (js/Date.)
+               callback (fn listener [& _args]
+                          (let [cn (vswap! complete inc)]
+                            (when (or (<= n cn)
+                                      (< dur (- (js/Date.) started)))
+                              (.removeEventListener el "transitionend" listener)
+                              (js/clearTimeout @timer)
+                              (f))))]
+           (.addEventListener el "transitionend" callback)
+           ;; The timer is a fail-safe. You could have set transition properties
+           ;; that either don't change, or don't change in a way that triggers an
+           ;; actual transition on unmount (e.g. changing height from auto to 0
+           ;; causes no transition). When this happens, there will not be as many
+           ;; transitionend events as there are transition durations. To avoid
+           ;; getting stuck, the timer will come in and clean up.
+           ;;
+           ;; The timer is set with a hefty delay to avoid cutting a transition
+           ;; short, in the case of a backed up browser working on overtime. Not
+           ;; sure how realistic this is, but better safe than sorry, and the
+           ;; important part is that the element doesn't get stuck forever.
+           (vreset! timer (js/setTimeout callback (+ dur 200))))))))
+
+#?(:default (def ^:no-doc memories (js/WeakMap.)))
 
 (defn ^:export recall [node]
-  (.get ^js memories node))
+  #?(:rust (dom/recall node)
+     :default (.get ^js memories node)))
 
-(defn ^:no-doc create-renderer []
-  (reify
-    replicant/IRender
-    (attached? [_this el]
-      (.-isConnected el))
+#?(:rust
+   (defn ^:no-doc create-renderer []
+     (reify
+       replicant/IRender
+       (attached? [_this el]
+         (dom/connected? el))
 
-    (create-text-node [_this text]
-      (js/document.createTextNode text))
+       (create-text-node [_this text]
+         (dom/create-text text))
 
-    (create-element [_this tag-name options]
-      (if-let [ns (:ns options)]
-        (js/document.createElementNS ns tag-name)
-        (js/document.createElement tag-name)))
+       (create-element [_this tag-name options]
+         (if-let [ns (:ns options)]
+           (dom/create-ns ns tag-name)
+           (dom/create tag-name)))
 
-    (set-style [this ^js el style v]
-      (.setProperty (.-style el) (name style) v)
-      this)
+       (set-style [this el style v]
+         (dom/set-style! el (name style) v)
+         this)
 
-    (remove-style [this ^js el style]
-      (.removeProperty (.-style el) (name style))
-      this)
+       (remove-style [this el style]
+         (dom/remove-style! el (name style))
+         this)
 
-    (add-class [this ^js el cn]
-      (.add (.-classList el) cn)
-      this)
+       (add-class [this el cn]
+         (dom/add-class! el cn)
+         this)
 
-    (remove-class [this ^js el cn]
-      (.remove (.-classList el) cn)
-      this)
+       (remove-class [this el cn]
+         (dom/remove-class! el cn)
+         this)
 
-    (set-attribute [this ^js el attr v opt]
-      (errors/with-error-handling "setting attribute" {:el el :attr attr :v v}
-        (cond
-          (= "innerHTML" attr)
-          (set! (.-innerHTML el) v)
+       (set-attribute [this el attr v opt]
+         (cond
+           (= "innerHTML" attr) (dom/set-html! el v)
+           (= "value" attr) (dom/set-value! el v)
+           (= "default-value" attr) (dom/set-attr! el "value" v)
+           (= "selected" attr) (dom/set-selected! el v)
+           (= "default-selected" attr) (dom/set-attr! el "selected" v)
+           (= "checked" attr) (dom/set-checked! el v)
+           (= "default-checked" attr) (dom/set-attr! el "checked" v)
+           (:ns opt) (dom/set-attr-ns! el (:ns opt) attr v)
+           :else (dom/set-attr! el attr v))
+         this)
 
-          (= "value" attr)
-          (set! (.-value el) v)
+       (remove-attribute [this el attr]
+         (cond
+           (= "innerHTML" attr) (dom/set-html! el "")
+           (= "value" attr) (dom/set-prop! el "value" nil)
+           (= "default-value" attr) (dom/remove-attr! el "value")
+           (= "selected" attr) (dom/set-prop! el "selected" nil)
+           (= "default-selected" attr) (dom/remove-attr! el "selected")
+           (= "checked" attr) (dom/set-prop! el "checked" nil)
+           (= "default-checked" attr) (dom/remove-attr! el "checked")
+           :else (dom/remove-attr! el attr))
+         this)
 
-          (= "default-value" attr)
-          (.setAttribute el "value" v)
+       ;; Handler bookkeeping mirrors the browser backend, which stashes the live
+       ;; listeners on the node itself (`.-replicantHandlers`). Here we store the
+       ;; cljrs.dom listener handles in a Clojure map under a single node
+       ;; property, so re-binding a handler can `unlisten!` the previous one. This
+       ;; relies on cljrs.dom set-prop!/get-prop round-tripping a Clojure value;
+       ;; see doc/cljrs-port/cljrs-dom-requirements.md for the open question.
+       (set-event-handler [this el event handler opt]
+         (let [event (name event)
+               handlers (or (dom/get-prop el "replicantHandlers") {})]
+           (some-> (get handlers event) dom/unlisten!)
+           (let [listener (dom/listen! el event handler (or opt {}))]
+             (dom/set-prop! el "replicantHandlers" (assoc handlers event listener))))
+         this)
 
-          (= "selected" attr)
-          (set! (.-selected el) v)
+       (remove-event-handler [this el event opt]
+         (let [event (name event)
+               handlers (or (dom/get-prop el "replicantHandlers") {})]
+           (some-> (get handlers event) dom/unlisten!)
+           (dom/set-prop! el "replicantHandlers" (dissoc handlers event)))
+         this)
 
-          (= "default-selected" attr)
-          (.setAttribute el "selected" v)
+       (append-child [this el child-node]
+         (dom/append! el child-node)
+         this)
 
-          (= "checked" attr)
-          (set! (.-checked el) v)
+       (insert-before [this el child-node reference-node]
+         (dom/insert-before! el child-node reference-node)
+         this)
 
-          (= "default-checked" attr)
-          (.setAttribute el "checked" v)
+       (remove-child [this el child-node]
+         ;; cljrs.dom remove! detaches a node from its parent
+         (dom/remove! child-node)
+         this)
 
-          (:ns opt)
-          (.setAttributeNS el (:ns opt) attr v)
+       (on-transition-end [this el f]
+         (-on-transition-end el f)
+         this)
 
-          :else
-          (.setAttribute el attr v)))
-      this)
+       (replace-child [this el insert-child replace-child]
+         ;; cljrs.dom replace! replaces the first node with the second
+         (dom/replace! replace-child insert-child)
+         this)
 
-    (remove-attribute [this ^js el attr]
-      (cond
-        (= "innerHTML" attr)
-        (set! (.-innerHTML el) "")
+       (remove-all-children [this el]
+         (dom/set-text! el "")
+         this)
 
-        (= "value" attr)
-        (set! (.-value el) nil)
+       (get-child [_this el idx]
+         (dom/child-at el idx))
 
-        (= "default-value" attr)
-        (.removeAttribute el "value")
+       (next-frame [_this f]
+         (on-next-frame f))
 
-        (= "selected" attr)
-        (set! (.-selected el) nil)
+       replicant/IMemory
+       (remember [_this node memory]
+         (dom/remember! node memory))
 
-        (= "default-selected" attr)
-        (.removeAttribute el "selected")
+       (recall [_this node]
+         (dom/recall node))))
 
-        (= "checked" attr)
-        (set! (.-checked el) nil)
+   :default
+   (defn ^:no-doc create-renderer []
+     (reify
+       replicant/IRender
+       (attached? [_this el]
+         (.-isConnected el))
 
-        (= "default-checked" attr)
-        (.removeAttribute el "checked")
+       (create-text-node [_this text]
+         (js/document.createTextNode text))
 
-        :else
-        (.removeAttribute el attr))
-      this)
+       (create-element [_this tag-name options]
+         (if-let [ns (:ns options)]
+           (js/document.createElementNS ns tag-name)
+           (js/document.createElement tag-name)))
 
-    (set-event-handler [this ^js/EventTarget el event handler opt]
-      (when-not (.-replicantHandlers el)
-        (set! (.-replicantHandlers el) #js {}))
-      (let [event (name event)]
-        (remove-listener el event opt)
-        (aset (.-replicantHandlers el) event handler)
-        (.addEventListener el event handler (clj->js opt)))
-      this)
+       (set-style [this ^js el style v]
+         (.setProperty (.-style el) (name style) v)
+         this)
 
-    (remove-event-handler [this ^js/EventTarget el event opt]
-      (let [event (name event)]
-        (remove-listener el event opt)
-        (aset (.-replicantHandlers el) event nil))
-      this)
+       (remove-style [this ^js el style]
+         (.removeProperty (.-style el) (name style))
+         this)
 
-    (append-child [this ^js el child-node]
-      (.appendChild el child-node)
-      this)
+       (add-class [this ^js el cn]
+         (.add (.-classList el) cn)
+         this)
 
-    (insert-before [this ^js el child-node reference-node]
-      (.insertBefore el child-node reference-node)
-      this)
+       (remove-class [this ^js el cn]
+         (.remove (.-classList el) cn)
+         this)
 
-    (remove-child [this ^js el child-node]
-      (.removeChild el child-node)
-      this)
+       (set-attribute [this ^js el attr v opt]
+         (errors/with-error-handling "setting attribute" {:el el :attr attr :v v}
+           (cond
+             (= "innerHTML" attr)
+             (set! (.-innerHTML el) v)
 
-    (on-transition-end [this ^js el f]
-      (-on-transition-end el f)
-      this)
+             (= "value" attr)
+             (set! (.-value el) v)
 
-    (replace-child [this ^js el insert-child replace-child]
-      (.replaceChild el insert-child replace-child)
-      this)
+             (= "default-value" attr)
+             (.setAttribute el "value" v)
 
-    (remove-all-children [this ^js el]
-      (set! (.-textContent el) "")
-      this)
+             (= "selected" attr)
+             (set! (.-selected el) v)
 
-    (get-child [_this ^js el idx]
-      (aget (.-childNodes el) idx))
+             (= "default-selected" attr)
+             (.setAttribute el "selected" v)
 
-    (next-frame [_this f]
-      (on-next-frame f))
+             (= "checked" attr)
+             (set! (.-checked el) v)
 
-    replicant/IMemory
-    (remember [_this ^js node memory]
-      (.set ^js memories node memory))
+             (= "default-checked" attr)
+             (.setAttribute el "checked" v)
 
-    (recall [_this ^js node]
-      (.get ^js memories node))))
+             (:ns opt)
+             (.setAttributeNS el (:ns opt) attr v)
+
+             :else
+             (.setAttribute el attr v)))
+         this)
+
+       (remove-attribute [this ^js el attr]
+         (cond
+           (= "innerHTML" attr)
+           (set! (.-innerHTML el) "")
+
+           (= "value" attr)
+           (set! (.-value el) nil)
+
+           (= "default-value" attr)
+           (.removeAttribute el "value")
+
+           (= "selected" attr)
+           (set! (.-selected el) nil)
+
+           (= "default-selected" attr)
+           (.removeAttribute el "selected")
+
+           (= "checked" attr)
+           (set! (.-checked el) nil)
+
+           (= "default-checked" attr)
+           (.removeAttribute el "checked")
+
+           :else
+           (.removeAttribute el attr))
+         this)
+
+       (set-event-handler [this ^js/EventTarget el event handler opt]
+         (when-not (.-replicantHandlers el)
+           (set! (.-replicantHandlers el) #js {}))
+         (let [event (name event)]
+           (remove-listener el event opt)
+           (aset (.-replicantHandlers el) event handler)
+           (.addEventListener el event handler (clj->js opt)))
+         this)
+
+       (remove-event-handler [this ^js/EventTarget el event opt]
+         (let [event (name event)]
+           (remove-listener el event opt)
+           (aset (.-replicantHandlers el) event nil))
+         this)
+
+       (append-child [this ^js el child-node]
+         (.appendChild el child-node)
+         this)
+
+       (insert-before [this ^js el child-node reference-node]
+         (.insertBefore el child-node reference-node)
+         this)
+
+       (remove-child [this ^js el child-node]
+         (.removeChild el child-node)
+         this)
+
+       (on-transition-end [this ^js el f]
+         (-on-transition-end el f)
+         this)
+
+       (replace-child [this ^js el insert-child replace-child]
+         (.replaceChild el insert-child replace-child)
+         this)
+
+       (remove-all-children [this ^js el]
+         (set! (.-textContent el) "")
+         this)
+
+       (get-child [_this ^js el idx]
+         (aget (.-childNodes el) idx))
+
+       (next-frame [_this f]
+         (on-next-frame f))
+
+       replicant/IMemory
+       (remember [_this ^js node memory]
+         (.set ^js memories node memory))
+
+       (recall [_this ^js node]
+         (.get ^js memories node)))))
 
 (defonce ^:no-doc state (volatile! {}))
+
+(defn ^:no-doc -clear-element [el]
+  #?(:rust (dom/set-html! el "")
+     :default (set! (.-innerHTML el) "")))
+
+(defn ^:no-doc -request-frame [f]
+  #?(:rust (dom/request-animation-frame f)
+     :default (js/requestAnimationFrame f)))
+
+(defn ^:no-doc -report-render-error [aliases e]
+  (let [msg (str "Caught exception during rendering. "
+                 (if aliases
+                   "You may have misbehaving aliases, or you have encountered a bug in Replicant."
+                   "This is likely a bug in Replicant."))]
+    #?(:rust (do (println msg) (println e))
+       :default (js/console.error msg e))))
 
 (defn ^:export render
   "Render `hiccup` in DOM element `el`. Replaces any pre-existing content not
@@ -200,7 +360,7 @@
   [^js el hiccup & [{:keys [aliases alias-data]}]]
   (let [rendering? (get-in @state [el :rendering?])]
     (when-not (contains? @state el)
-      (set! (.-innerHTML el) "")
+      (-clear-element el)
       (vswap! state assoc el {:renderer (create-renderer)
                               :unmounts (volatile! #{})
                               :unmount-hooks (volatile! (r/node-map))
@@ -214,8 +374,10 @@
         (let [{:keys [renderer current unmounts unmount-hooks]} (get @state el)
               aliases (or aliases (alias/get-registered-aliases))
               ;; with-dev-key is a clj macro tied to the cljs compiler, which
-              ;; squint cannot expand, so the dev-key injection is skipped there
+              ;; neither squint nor cljrs can expand, so the dev-key injection is
+              ;; skipped on those targets
               hiccup #?(:squint hiccup
+                        :rust hiccup
                         :default (if alias-data
                                    (env/with-dev-key hiccup [aliases alias-data])
                                    (env/with-dev-key hiccup aliases)))
@@ -224,17 +386,13 @@
                                                                         :unmount-hooks unmount-hooks
                                                                         :aliases aliases
                                                                         :alias-data alias-data})
-                               (catch :default e
-                                 (js/console.error (str "Caught exception during rendering. "
-                                                        (if aliases
-                                                          "You may have misbehaving aliases, or you have encountered a bug in Replicant."
-                                                          "This is likely a bug in Replicant."))
-                                                   e)
+                               (catch #?(:clj Exception :default :default) e
+                                 (-report-render-error aliases e)
                                  nil))]
           (vswap! state update el merge (cond-> {:rendering? false}
                                           vdom (assoc :current vdom)))
           (when-let [pending (:queued (get @state el))]
-            (js/requestAnimationFrame #(render el pending))
+            (-request-frame #(render el pending))
             (vswap! state update el dissoc :queued))))))
   el)
 
@@ -242,7 +400,7 @@
   "Unmounts elements in `el`, and clears internal state."
   [^js el]
   (if (get-in @state [el :rendering?])
-    (js/requestAnimationFrame #(unmount el))
+    (-request-frame #(unmount el))
     (do
       (render el nil)
       (vswap! state dissoc el)

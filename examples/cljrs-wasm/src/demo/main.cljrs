@@ -1,0 +1,45 @@
+(ns demo.main
+  "A minimal Replicant app targeting cljrs/WASM. It exercises the parts of the
+  renderer that depend on the cljrs.dom additions: element + text creation,
+  attributes, a form property (checked), event handlers, keyed-child reordering,
+  and a namespaced (SVG) subtree."
+  (:require [cljrs.dom :as dom]
+            [replicant.dom :as r]))
+
+(defonce store (atom {:count 0
+                      :items [:a :b :c]
+                      :done? false}))
+
+(defn ui [{:keys [count items done?]}]
+  [:div
+   [:h1 "Replicant on cljrs/wasm"]
+   [:p "Count: " count]
+   [:button {:on {:click [:inc]}} "Increment"]
+   [:button {:on {:click [:shuffle]}} "Reverse list"]
+   [:label
+    [:input {:type "checkbox"
+             :checked done?
+             :on {:change [:toggle]}}]
+    " done"]
+   ;; Namespaced subtree: create-element NS + setAttribute exercised
+   [:svg {:viewBox "0 0 100 100" :width 100 :height 100}
+    [:circle {:cx 50 :cy 50 :r (+ 10 count) :fill "tomato"}]]
+   ;; Keyed children: reversing the list exercises insert-before! / child-at
+   [:ul
+    (for [item items]
+      [:li {:replicant/key item} (str "Item " (name item))])]])
+
+(defn render! []
+  (r/render (dom/by-id "app") (ui @store)))
+
+(defn handle [_event-data [action]]
+  (case action
+    :inc     (swap! store update :count inc)
+    :shuffle (swap! store update :items (comp vec reverse))
+    :toggle  (swap! store update :done? not)
+    nil)
+  (render!))
+
+(defn ^:export main []
+  (r/set-dispatch! handle)
+  (render!))
