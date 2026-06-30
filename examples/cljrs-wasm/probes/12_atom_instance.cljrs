@@ -1,0 +1,3 @@
+(ns cljrs-probe.atom-instance)
+;; mutation_log/atom? uses (instance? clojure.lang.Atom x); confirm cljrs maps it.
+(println "12 atom-instance:" (instance? clojure.lang.Atom (atom 1)))

@@ -107,18 +107,19 @@ metadata map at position 0. **Resolved upstream in cljrs 0.1.196.** This unblock
 added to `transition.cljc`, `replicant.transition-test` is promoted to the CI
 gate.
 
-### 2. Auto-gensym `symbol#` in syntax-quote
+### 2. Auto-gensym `symbol#` in syntax-quote — FIXED in cljrs 0.1.197
 
 ```clojure
-(defmacro m [] `(let [x# 1 y# 2] [x# y#]))  ; → "unknown # dispatch character"
+(defmacro m [] `(let [x# 1 y# 2] [x# y#]))  ; was: "unknown # dispatch character"
 ```
 
-cljrs's reader does not tokenize the auto-gensym `x#` suffix; it treats the `#`
-as a dispatch macro. This blocks every syntax-quoting macro — `alias.cljc`
-(`args#`, surfaces as "unknown # dispatch character ]" on `args#]`),
-`asserts.cljc` and `hiccup_headers.cljc` (`class#`, `pt#`, … — surfaces as the
-"map literal must have an even number of forms" cascade when the mis-tokenized
-gensym throws the form count off), `assert.cljc`, `errors.cljc`.
+cljrs's reader did not tokenize the auto-gensym `x#` suffix; it treated the `#`
+as a dispatch macro, which blocked every syntax-quoting macro (`alias.cljc`,
+`asserts.cljc`, `hiccup_headers.cljc`, `assert.cljc`, `errors.cljc`).
+**Resolved upstream in cljrs 0.1.197.** This lets the macro-heavy namespaces
+*read*; the remaining work for `core-test`/`string-test`/`alias-test` is runtime
+adaptation of the `mutation_log` fake renderer (the `:rust` arms for `atom?` and
+the vector `.indexOf` in `mutation_log.cljc`).
 
 ### Minor: `unchecked-int` not bound (cljrs 0.1.196)
 

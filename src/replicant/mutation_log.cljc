@@ -14,7 +14,8 @@
       (:text el))))
 
 (defn -insert-before [children child reference]
-  (let [idx (.indexOf children reference)]
+  (let [idx #?(:rust (or (first (keep-indexed (fn [i x] (when (= x reference) i)) children)) -1)
+               :default (.indexOf children reference))]
     (vec (concat (remove #{child} (take idx children))
                  [child]
                  (remove #{child} (drop idx children))))))
@@ -47,7 +48,8 @@
 
 (defn atom? [x]
   (instance? #?(:clj clojure.lang.Atom
-                :cljs cljs.core/Atom) x))
+                :cljs cljs.core/Atom
+                :rust clojure.lang.Atom) x))
 
 (defn log [this event]
   (swap! (:log this) conj (mapv #(if (atom? %) (get-snapshot %) %) event)))
