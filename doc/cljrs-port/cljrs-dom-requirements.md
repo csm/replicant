@@ -4,11 +4,33 @@ This document specifies the additions needed in **clojurust**'s
 [`cljrs-dom`](https://github.com/csm/clojurust) crate (the `cljrs.dom` namespace)
 before Replicant can be ported to compile to WebAssembly via `cljrs`.
 
-It exists because the porting work is *blocked upstream*: Replicant's renderer
-contract (`replicant.protocols/IRender` + `IMemory`) needs a handful of DOM
-operations that `cljrs.dom` does not yet expose. Per the porting investigation,
-these are flagged here for upstream implementation rather than being worked
-around inside Replicant.
+Replicant's renderer contract (`replicant.protocols/IRender` + `IMemory`) needs a
+handful of DOM operations beyond `cljrs.dom`'s original surface. This document
+flagged them for upstream implementation rather than working around them inside
+Replicant.
+
+**Status: unblocked as of cljrs 0.1.195.** Every operation listed below now
+exists in `cljrs.dom`, and the library→WASM packaging workflow landed in
+0.1.194. This doc now serves as the mapping from each Replicant protocol method
+to the `cljrs.dom` function that implements it for the forthcoming `:rust`
+backend.
+
+### Resolution summary (cljrs 0.1.195)
+
+| Requirement | `cljrs.dom` fn | Landed |
+|---|---|---|
+| insert with reference node | `insert-before!` | 0.1.195 |
+| O(1) indexed child access | `child-at`, `child-count` | 0.1.195 |
+| SVG element creation | `create-ns` | 0.1.195 |
+| namespaced attributes | `set-attr-ns!`, `remove-attr-ns!` | 0.1.195 |
+| single-property style removal | `remove-style!` | 0.1.195 |
+| form DOM properties | `set-checked!`, `set-selected!`, `set-prop!`, `get-prop` | 0.1.195 |
+| listener options + removal | `listen!`/`unlisten!` with `{:capture :passive :once}` (capture-aware) | 0.1.195 |
+| attachment check | `connected?` | 0.1.195 |
+| frame scheduling | `request-animation-frame` | 0.1.195 |
+| computed style | `computed-style` | 0.1.195 |
+| node memory | `remember!`, `recall` | 0.1.195 |
+| library → WASM packaging | `cljrs` wasm CLI | 0.1.194 |
 
 ## Background
 
@@ -73,12 +95,12 @@ Verified against the crate source (`crates/cljrs-dom/src/fns.rs`,
 
 These map cleanly and need no upstream change.
 
-## Required upstream additions
+## Operations added upstream (all available as of cljrs 0.1.195)
 
-Each item lists the proposed `cljrs.dom` function, the `IRender`/`IMemory`
-method it unblocks, and the exact call site in `src/replicant/dom.cljc` that
-needs it. Names are suggestions following the existing cljrs.dom conventions
-(kebab-case, `!`-suffixed mutations).
+Each item lists the `cljrs.dom` function, the `IRender`/`IMemory` method it
+implements, and the exact call site in `src/replicant/dom.cljc` that consumes it.
+All of these are now present in `cljrs.dom`; the signatures below match what
+shipped.
 
 ### 1. `insert-before!` — **critical**
 
@@ -170,13 +192,13 @@ needs it. Names are suggestions following the existing cljrs.dom conventions
 - **Unblocks:** `IRender/set-event-handler` / `remove-event-handler`
   (`dom.cljc:141-154`), which receive an `opt` map and must add/remove with the
   same options (capture phase in particular).
-- **Why:** `cljrs.dom`'s `listen!` currently takes no options and has no capture
-  support; `addEventListener`/`removeEventListener` must agree on the `capture`
-  flag or removal silently fails. Replicant also re-binds handlers per render, so
-  it needs deterministic removal keyed by `(node, event, opts)` or a stored
-  handle. (Replicant's browser impl stashes handlers on the node in a
-  `replicantHandlers` map; the cljrs.dom equivalent can be internal, but the API
-  must let Replicant replace a handler for a given `(node,event,opts)`.)
+- **Resolved (0.1.195):** `listen!` accepts `{:capture :passive :once}` and
+  returns a `DomListener` handle that stores the `capture` flag; `unlisten!`
+  removes via that handle (`removeEventListener` with the matching capture flag),
+  so capture-phase listeners remove correctly. The `:rust` backend stores the
+  returned handle per `(node, event)` — analogous to how the browser impl stashes
+  handlers in `replicantHandlers` (`dom.cljc:142-147`) — and passes it to
+  `unlisten!` when re-binding.
 
 ### 8. `connected?` — attachment check
 
@@ -234,7 +256,7 @@ needs it. Names are suggestions following the existing cljrs.dom conventions
     references → potential retention), so (a) is preferred. Please confirm which
     guarantee cljrs provides.
 
-## Toolchain: library → WASM packaging (landing in cljrs 0.1.194)
+## Toolchain: library → WASM packaging (landed in cljrs 0.1.194)
 
 Earlier `cljrs` releases had no documented path to package a cljrs *library*
 (Replicant's `.cljc`) plus an application entry point into a loadable
