@@ -1,0 +1,5 @@
+(ns cljrs-probe.require-core)
+;; Locates the "map literal must have an even number of forms" read error:
+;; cljrs run prints file:line:col for read errors.
+(require 'replicant.core)
+(println "15 require-core: ok")

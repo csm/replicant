@@ -63,9 +63,9 @@ jobs:
         # this step always succeeds; it just prints a PASS/FAIL matrix.
         run: |
           echo "cljrs feature matrix:"
-          rc=0
           for f in examples/cljrs-wasm/probes/*.cljrs; do
-            if out=$(cljrs run "$f" 2>&1); then
+            # src/test on the path so require-based probes can resolve replicant.*
+            if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
               echo "PASS  $(basename "$f")  -> $out"
             else
               echo "FAIL  $(basename "$f")  -> $out"

@@ -94,18 +94,20 @@ precise capability matrix on **cljrs 0.1.195**. Two standard-Clojure reader
 features are missing; both must be fixed in cljrs before the macro-heavy
 namespaces can load. These are upstream cljrs bugs, not replicant issues.
 
-### 1. Reader metadata on `ns` / `def` / `defmacro` names — FIXED in cljrs 0.1.196
+### 1. Reader metadata on `ns` / `def` names — FIXED in 0.1.196; `defmacro` STILL BROKEN (0.1.197)
 
 ```clojure
-(ns ^:no-doc cljrs-probe.ns-meta)          ; was: "ns requires a symbol at position 0"
-(defmacro ^{:indent 2} m [x] `(inc ~x))    ; was: "defmacro requires a symbol at position 0"
+(ns ^:no-doc cljrs-probe.ns-meta)          ; FIXED 0.1.196
+(def ^:no-doc x 1)                         ; FIXED 0.1.196
+(defmacro ^{:indent 2} m [x] `(inc ~x))    ; STILL: "defmacro requires a symbol at position 0" (probe 10)
 ```
 
-`^meta` was not attached to the following symbol, so the special form saw the
-metadata map at position 0. **Resolved upstream in cljrs 0.1.196.** This unblocks
-`transition.cljc` (which has no macros); with the `:rust` string-interop branch
-added to `transition.cljc`, `replicant.transition-test` is promoted to the CI
-gate.
+`^meta` on `ns`/`def` names is now attached correctly (0.1.196), but **`defmacro`
+was missed** — metadata on a `defmacro` name still lands at position 0. Replicant
+uses `(defmacro ^:no-doc …)` / `(defmacro ^{:indent 2} …)` in `assert.cljc` and
+`errors.cljc`, so this blocks `alias-test` (which requires `replicant.assert`).
+Needs the same fix extended to `defmacro` upstream. The `ns`/`def` fix already
+unblocked `transition.cljc`, now passing in the gate.
 
 ### 2. Auto-gensym `symbol#` in syntax-quote — FIXED in cljrs 0.1.197
 

@@ -1,0 +1,3 @@
+(ns cljrs-probe.require-string)
+(require 'replicant.string)
+(println "16 require-string: ok")

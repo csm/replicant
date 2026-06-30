@@ -47,9 +47,11 @@
       (:children el) (update :children #(map get-snapshot %)))))
 
 (defn atom? [x]
-  (instance? #?(:clj clojure.lang.Atom
-                :cljs cljs.core/Atom
-                :rust clojure.lang.Atom) x))
+  ;; cljrs provides clojure.core/atom? (and (instance? clojure.lang.Atom x)
+  ;; returns false there), so the :rust arm uses the core predicate.
+  #?(:rust (clojure.core/atom? x)
+     :default (instance? #?(:clj clojure.lang.Atom
+                            :cljs cljs.core/Atom) x)))
 
 (defn log [this event]
   (swap! (:log this) conj (mapv #(if (atom? %) (get-snapshot %) %) event)))
