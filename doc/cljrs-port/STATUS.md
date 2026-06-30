@@ -87,6 +87,55 @@ confirm:
 Then run the no-DOM milestone (pure-data tests via `mutation_log`) before the
 browser/wasm integration test. See `examples/cljrs-wasm/README.md`.
 
+## cljrs reader deficiencies blocking the port (flag upstream)
+
+The CI feature probes (`examples/cljrs-wasm/probes/`, run by the workflow) give a
+precise capability matrix on **cljrs 0.1.195**. Two standard-Clojure reader
+features are missing; both must be fixed in cljrs before the macro-heavy
+namespaces can load. These are upstream cljrs bugs, not replicant issues.
+
+### 1. Reader metadata on `ns` / `def` / `defmacro` names
+
+```clojure
+(ns ^:no-doc cljrs-probe.ns-meta)          ; → "ns requires a symbol at position 0"
+(defmacro ^{:indent 2} m [x] `(inc ~x))    ; → "defmacro requires a symbol at position 0"
+```
+
+`^meta` is not attached to the following symbol, so the special form sees the
+metadata map at position 0. Replicant uses this pervasively
+(`(ns ^:no-doc replicant.core …)`, `(defmacro ^{:indent 2} aliasfn …)`,
+`(def ^:no-doc …)`), so it blocks `transition.cljc`, `alias.cljc`, `core.cljc`,
+`vdom.cljc`, `hiccup_headers.cljc`, and more.
+
+### 2. Auto-gensym `symbol#` in syntax-quote
+
+```clojure
+(defmacro m [] `(let [x# 1 y# 2] [x# y#]))  ; → "unknown # dispatch character"
+```
+
+cljrs's reader does not tokenize the auto-gensym `x#` suffix; it treats the `#`
+as a dispatch macro. This blocks every syntax-quoting macro — `alias.cljc`
+(`args#`, surfaces as "unknown # dispatch character ]" on `args#]`),
+`asserts.cljc` and `hiccup_headers.cljc` (`class#`, `pt#`, … — surfaces as the
+"map literal must have an even number of forms" cascade when the mis-tokenized
+gensym throws the form count off), `assert.cljc`, `errors.cljc`.
+
+### Confirmed working on cljrs 0.1.195 (no action needed)
+
+`#js` tagged literals skipped in non-selected reader-conditional branches;
+nested reader conditionals; `clojure.string` (`subs`, `index-of`, `split`,
+`trim`, `starts-with?`); `unchecked-inc-int`/`unchecked-add-int`/`unchecked-dec-int`;
+transients (`transient`/`conj!`/`persistent!`); `clojure.walk`; regex literals
+with `#`/`[]` character classes. This validates the `:rust` renderer and the
+`:rust` reader-conditional branches added to `core.cljc`/`string.cljc` — they
+load and run; the blockers are purely the two reader gaps above.
+
+### Result
+
+`replicant.hiccup-test` passes under cljrs (2 tests, 6 assertions). The other
+four headless suites fail to *load* solely because of the two reader gaps. Once
+those land in cljrs, re-run and promote them in the workflow.
+
 ## CI
 
 `.github/workflows/cljrs.yml` automates the no-DOM milestone: it installs
