@@ -94,20 +94,29 @@ precise capability matrix on **cljrs 0.1.195**. Two standard-Clojure reader
 features are missing; both must be fixed in cljrs before the macro-heavy
 namespaces can load. These are upstream cljrs bugs, not replicant issues.
 
-### 1. Reader metadata on `ns` / `def` names — FIXED in 0.1.196; `defmacro` STILL BROKEN (0.1.197)
+### 1. Reader metadata on `ns` / `def` / `defmacro` names — FIXED (0.1.196 + 0.1.198)
 
 ```clojure
 (ns ^:no-doc cljrs-probe.ns-meta)          ; FIXED 0.1.196
 (def ^:no-doc x 1)                         ; FIXED 0.1.196
-(defmacro ^{:indent 2} m [x] `(inc ~x))    ; STILL: "defmacro requires a symbol at position 0" (probe 10)
+(defmacro ^{:indent 2} m [x] `(inc ~x))    ; FIXED 0.1.198 (defmacro was missed in 0.1.196)
 ```
 
-`^meta` on `ns`/`def` names is now attached correctly (0.1.196), but **`defmacro`
-was missed** — metadata on a `defmacro` name still lands at position 0. Replicant
-uses `(defmacro ^:no-doc …)` / `(defmacro ^{:indent 2} …)` in `assert.cljc` and
-`errors.cljc`, so this blocks `alias-test` (which requires `replicant.assert`).
-Needs the same fix extended to `defmacro` upstream. The `ns`/`def` fix already
-unblocked `transition.cljc`, now passing in the gate.
+### 1b. Map-literal reader bug — FIXED in 0.1.198
+
+`core.cljc` failed to read with "map literal must have an even number of forms"
+(unrelated to auto-gensym). Resolved upstream in 0.1.198.
+
+### 1c. `declare` unbound — OPEN (0.1.198)
+
+```clojure
+(declare later)  ; → "unbound symbol: declare"
+```
+
+cljrs core does not provide the `declare` macro. Replicant uses it for forward
+references in `core.cljc:694` (`(declare reconcile*)`) and `mutation_log.cljc:5`.
+Now the sole blocker for `alias-test`/`string-test`/`core-test`, which otherwise
+read and begin evaluating. Standard `clojure.core` macro; needs adding upstream.
 
 ### 2. Auto-gensym `symbol#` in syntax-quote — FIXED in cljrs 0.1.197
 

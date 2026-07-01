@@ -1,0 +1,6 @@
+(ns cljrs-probe.declare-test)
+;; core.cljc and mutation_log.cljc use (declare ...) for forward references.
+(declare later)
+(defn use-it [] (later))
+(defn later [] 42)
+(println "17 declare:" (use-it))
