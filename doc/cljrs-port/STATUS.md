@@ -138,16 +138,27 @@ the vector `.indexOf` in `mutation_log.cljc`).
 alias/string/core-test; 3 pass). The failures now split into two runtime gaps,
 both with isolating probes:
 
-1. **`:extend-via-metadata` protocol dispatch — "not callable: <fn> is not
-   callable" (195×, probe 18).** A protocol declared `:extend-via-metadata true`
-   and implemented via `(with-meta obj {\`method (fn …)})` cannot be invoked —
-   cljrs finds the impl fn but reports it as not callable. This is exactly how
-   the `mutation_log` fake renderer provides `IRender`, so it blocks essentially
-   all of `core-test` (every `h/render` goes through it). Highest priority.
-2. **Dynamic vars via `binding` / qualified cross-ns access — "unbound symbol:
-   *dispatch*" (7×, probe 19).** `(binding [replicant.core/*dispatch* f] …)` in
-   the life-cycle tests fails to resolve/bind the dynamic var. Replicant's public
-   `set-dispatch!` and life-cycle dispatch depend on this dynamic var.
+1. **`:extend-via-metadata` protocol dispatch (probe 18) — STILL OPEN at 0.1.201.**
+   A protocol declared `:extend-via-metadata true` and implemented via
+   `(with-meta obj {\`method (fn …)})` is not dispatched to the metadata impl:
+   0.1.200 reported "not callable"; 0.1.201 now reports **"No implementation of
+   protocol P for type Object"** (24× "No implementation of protocol IRender" in
+   `core-test`). This is exactly how the `mutation_log` fake renderer provides
+   `IRender`, so it blocks the reconcile suite. **Highest priority; not fixed in
+   0.1.201.**
+2. **Dynamic vars via `binding` / qualified cross-ns access (probe 19) — FIXED in
+   0.1.201.** `(binding [replicant.core/*dispatch* f] …)` now works.
+
+### Additional missing `clojure.core` (surfaced at 0.1.201)
+
+3. **`run!` — unbound (32×, probe 21).** Called in ~10 hot paths in `core.cljc`
+   (attribute/class/style updates, post-mount), lines 449–1085.
+4. **`some->>` — unbound (20×, probe 22).** Used in `core.cljc:303`
+   (`get-children`).
+5. **"not callable: <fn>" (350×, probe 20)** — still to be root-caused; probe 20
+   exercises `comp`/`partial`/keyword-/set-/map-as-fn/`apply`/HOFs to find which
+   callable pattern cljrs rejects. Present even on renderer-free paths
+   (`get-hiccup-headers`).
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.

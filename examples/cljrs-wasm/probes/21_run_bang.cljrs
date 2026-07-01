@@ -1,0 +1,4 @@
+(ns cljrs-probe.run-bang)
+;; core.cljc calls (run! f coll) in ~10 hot paths (attrs/classes/styles/mounts).
+(run! prn [1 2 3])
+(println "21 run!: ok")
