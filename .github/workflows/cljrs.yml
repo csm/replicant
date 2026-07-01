@@ -28,9 +28,10 @@ on:
 env:
   # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI; 0.1.196 adds
   # reader metadata on ns/def names; 0.1.197 adds auto-gensym (symbol#); 0.1.198
-  # is the next release under test. Bump this (the cache key picks it up
-  # automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.198"
+  # adds defmacro-name metadata + the map-literal reader fix; 0.1.199 adds the
+  # `declare` macro. Bump this (the cache key picks it up automatically) to track
+  # newer releases.
+  CLJRS_VERSION: "0.1.199"
 
 jobs:
   pure-data-tests:
