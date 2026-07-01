@@ -132,6 +132,26 @@ as a dispatch macro, which blocked every syntax-quoting macro (`alias.cljc`,
 adaptation of the `mutation_log` fake renderer (the `:rust` arms for `atom?` and
 the vector `.indexOf` in `mutation_log.cljc`).
 
+### Runtime gaps found once suites execute (cljrs 0.1.200)
+
+0.1.200 gets all three remaining suites *running* (230 assertions execute across
+alias/string/core-test; 3 pass). The failures now split into two runtime gaps,
+both with isolating probes:
+
+1. **`:extend-via-metadata` protocol dispatch — "not callable: <fn> is not
+   callable" (195×, probe 18).** A protocol declared `:extend-via-metadata true`
+   and implemented via `(with-meta obj {\`method (fn …)})` cannot be invoked —
+   cljrs finds the impl fn but reports it as not callable. This is exactly how
+   the `mutation_log` fake renderer provides `IRender`, so it blocks essentially
+   all of `core-test` (every `h/render` goes through it). Highest priority.
+2. **Dynamic vars via `binding` / qualified cross-ns access — "unbound symbol:
+   *dispatch*" (7×, probe 19).** `(binding [replicant.core/*dispatch* f] …)` in
+   the life-cycle tests fails to resolve/bind the dynamic var. Replicant's public
+   `set-dispatch!` and life-cycle dispatch depend on this dynamic var.
+
+Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
+`string-test`) can then be triaged.
+
 ### Minor: `unchecked-int` not bound (cljrs 0.1.196)
 
 `unchecked-inc-int` / `unchecked-add-int` / `unchecked-dec-int` are bound, but the

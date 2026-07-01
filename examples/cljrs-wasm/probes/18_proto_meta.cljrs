@@ -1,0 +1,9 @@
+(ns cljrs-probe.proto-meta)
+;; Replicant's mutation-log fake renderer (which core-test drives) supplies its
+;; IRender implementation via metadata (:extend-via-metadata true +
+;; (with-meta {} {`method (fn ...)})). Reproduce that dispatch mechanism.
+(defprotocol P
+  :extend-via-metadata true
+  (greet [this x]))
+(def obj (with-meta {} {`greet (fn [_ x] (str "hi " x))}))
+(println "18 proto-meta:" (greet obj "there"))
