@@ -155,10 +155,18 @@ both with isolating probes:
    (attribute/class/style updates, post-mount), lines 449–1085.
 4. **`some->>` — unbound (20×, probe 22).** Used in `core.cljc:303`
    (`get-children`).
-5. **"not callable: <fn>" (350×, probe 20)** — still to be root-caused; probe 20
-   exercises `comp`/`partial`/keyword-/set-/map-as-fn/`apply`/HOFs to find which
-   callable pattern cljrs rejects. Present even on renderer-free paths
-   (`get-hiccup-headers`).
+5. **"not callable: <fn>" — OPEN at 0.1.203, root cause still elusive.** cljrs
+   0.1.203 fixed `:extend-via-metadata` (probe 18 PASS), `run!` (21), `some->>`
+   (22), and every callable pattern in probe 20 — yet `core-test` is unchanged at
+   0 failures / **185 errors, all "not callable: <fn>"**. So the isolated
+   mechanisms work but replicant's real code still trips it, on both the
+   reconcile path and the renderer-free `get-hiccup-headers` path. Probes 23
+   (reconcile via `mutation_log`) and 24 (`get-hiccup-headers`, no renderer)
+   bisect where it originates. This is now *the* remaining blocker for the whole
+   `core-test` suite.
+
+   Progress: 0.1.201 → 3 passed/214 errors; 0.1.203 → **21 passed/195 errors**
+   (alias/string cleared by the run!/some->> fixes).
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.

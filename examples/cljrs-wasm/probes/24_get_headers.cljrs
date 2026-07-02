@@ -1,0 +1,5 @@
+(ns cljrs-probe.get-headers
+  (:require [replicant.core :as core]))
+;; Non-renderer path: pure hiccup parsing. If THIS errors "not callable", the
+;; culprit is in core's parse/flatten path, not protocol dispatch.
+(println "24 headers:" (into [] (core/get-hiccup-headers nil [:h1 "hi"])))
