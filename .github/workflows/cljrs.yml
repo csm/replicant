@@ -31,8 +31,9 @@ env:
   # adds defmacro-name metadata + the map-literal reader fix; 0.1.199 adds the
   # `declare` macro. 0.1.200 adds map-entry?; 0.1.201 adds dynamic-var binding;
   # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
+  # 0.1.204 fixes cross namespace extend-via-metadata
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.203"
+  CLJRS_VERSION: "0.1.204"
 
 jobs:
   pure-data-tests:
