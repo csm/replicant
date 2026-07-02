@@ -168,6 +168,19 @@ both with isolating probes:
    Progress: 0.1.201 → 3 passed/214 errors; 0.1.203 → **21 passed/195 errors**
    (alias/string cleared by the run!/some->> fixes).
 
+   **Bisected (0.1.203):** probe 24 (`get-hiccup-headers`, no renderer) PASSES —
+   core parsing is fine; probe 23 (reconcile via `mutation_log`) FAILS with **"No
+   implementation of protocol IRender for type Object."** So all 185 `core-test`
+   errors are the renderer's `IRender`-via-metadata dispatch, not the parse path.
+
+   **Root cause — cross-namespace `:extend-via-metadata` (probe 25).** Probe 18
+   (protocol declared + extended + dispatched in one namespace) passes, but the
+   real setup fails: `IRender` is declared in `replicant.protocols`, extended via
+   metadata in `replicant.mutation-log`, and dispatched from `replicant.core`.
+   0.1.203's extend-via-metadata fix covers the same-namespace case but not this
+   cross-namespace one. This is the single remaining blocker for the entire
+   `core-test` suite; once it lands, core-test should run to real assertions.
+
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.
 
