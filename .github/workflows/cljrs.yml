@@ -29,10 +29,10 @@ env:
   # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI; 0.1.196 adds
   # reader metadata on ns/def names; 0.1.197 adds auto-gensym (symbol#); 0.1.198
   # adds defmacro-name metadata + the map-literal reader fix; 0.1.199 adds the
-  # `declare` macro. 0.1.200 adds map-entry?; 0.1.201 fixes the two biggest
-  # runtime gaps (extend-via-metadata protocol dispatch + dynamic-var binding).
+  # `declare` macro. 0.1.200 adds map-entry?; 0.1.201 adds dynamic-var binding;
+  # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.201"
+  CLJRS_VERSION: "0.1.203"
 
 jobs:
   pure-data-tests:
@@ -59,23 +59,6 @@ jobs:
       - name: Version
         run: cljrs --version
 
-      - name: cljrs reader/feature probes (diagnostic)
-        # Each probe isolates one language/reader feature the port relies on, so
-        # a failure points at a precise cljrs deficiency to flag upstream (rather
-        # than a terse, masked read error from the full test load). Tolerant:
-        # this step always succeeds; it just prints a PASS/FAIL matrix.
-        run: |
-          echo "cljrs feature matrix:"
-          for f in examples/cljrs-wasm/probes/*.cljrs; do
-            # src/test on the path so require-based probes can resolve replicant.*
-            if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
-              echo "PASS  $(basename "$f")  -> $out"
-            else
-              echo "FAIL  $(basename "$f")  -> $out"
-            fi
-          done
-          exit 0
-
       - name: Run pure-data tests (gate)
         # Suites that load and pass under cljrs today. transition-test is
         # unblocked as of cljrs 0.1.196 (ns metadata) plus the :rust string-interop
@@ -88,16 +71,33 @@ jobs:
             replicant.hiccup-test \
             replicant.transition-test
 
-      - name: Run pure-data tests blocked on cljrs reader fixes (informational)
-        # These still fail to LOAD due to cljrs reader gap #2: auto-gensym
-        # symbol# in syntax-quote (e.g. `(let [x# 1] x#)) -- used by the
-        # macro-heavy files these namespaces require (asserts/hiccup_headers/
-        # alias). See the feature matrix above and doc/cljrs-port/STATUS.md.
-        # Tolerant on purpose: flips to a real signal once cljrs can read them.
+      - name: Run pure-data tests blocked on cljrs runtime gaps (informational)
+        # These load now; remaining errors are runtime cljrs gaps tracked in
+        # doc/cljrs-port/STATUS.md (extend-via-metadata protocol dispatch, and
+        # any residual "not callable" cases). Tolerant: promotes to the gate once
+        # they pass.
         run: |
           cljrs test \
             --src-path src \
             --src-path test \
             replicant.alias-test \
             replicant.string-test \
-            replicant.core-test || echo "(still blocked on cljrs auto-gensym reader fix)"
+            replicant.core-test || echo "(still blocked on cljrs runtime gaps -- see STATUS.md)"
+
+      - name: cljrs reader/feature probes (diagnostic)
+        # Runs LAST so the PASS/FAIL matrix lands at the tail of the log (it was
+        # previously buried behind the test output). Each probe isolates one
+        # language/reader/runtime feature the port relies on, so a failure points
+        # at a precise cljrs deficiency. Tolerant: always exits 0.
+        if: always()
+        run: |
+          echo "cljrs feature matrix:"
+          for f in examples/cljrs-wasm/probes/*.cljrs; do
+            # src/test on the path so require-based probes can resolve replicant.*
+            if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
+              echo "PASS  $(basename "$f")  -> $out"
+            else
+              echo "FAIL  $(basename "$f")  -> $out"
+            fi
+          done
+          exit 0
