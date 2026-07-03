@@ -32,8 +32,9 @@ env:
   # `declare` macro. 0.1.200 adds map-entry?; 0.1.201 adds dynamic-var binding;
   # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
   # 0.1.204 fixes cross namespace extend-via-metadata
+  # 0.1.207 fixes map entry types, metadata for empty, and deref sugar in anonymous functions
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.204"
+  CLJRS_VERSION: "0.1.207"
 
 jobs:
   pure-data-tests:
