@@ -173,13 +173,18 @@ both with isolating probes:
    implementation of protocol IRender for type Object."** So all 185 `core-test`
    errors are the renderer's `IRender`-via-metadata dispatch, not the parse path.
 
-   **Root cause — cross-namespace `:extend-via-metadata` (probe 25).** Probe 18
-   (protocol declared + extended + dispatched in one namespace) passes, but the
-   real setup fails: `IRender` is declared in `replicant.protocols`, extended via
-   metadata in `replicant.mutation-log`, and dispatched from `replicant.core`.
-   0.1.203's extend-via-metadata fix covers the same-namespace case but not this
-   cross-namespace one. This is the single remaining blocker for the entire
-   `core-test` suite; once it lands, core-test should run to real assertions.
+   **Cross-namespace `:extend-via-metadata` — FIXED in 0.1.204** (probes 23 + 25
+   pass; the "No implementation of protocol IRender" and `unbound symbol` errors
+   are gone). But `core-test` is *still* 0 passed / 185 errors, now uniformly
+   **"not callable: <fn>"**. Bisection refined:
+   - probe 23 (single, attribute-free mount `[:h1 "hi"]`) — PASSES.
+   - 77 of 141 `core-test` errors are hookless plain renders — but they carry
+     **attributes** (`:style`/`:class`/`:innerHTML`/`:replicant/key`) and/or are
+     **re-renders** (`(-> (h/render A) (h/render B) …)`).
+   Probes 26 (single render *with* attributes) and 27 (re-render/update) bisect
+   whether "not callable" comes from the attribute-setting path, the
+   reconcile/update path, or is specific to `cljrs test` vs `cljrs run`. This is
+   now the sole remaining blocker for `core-test`.
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.

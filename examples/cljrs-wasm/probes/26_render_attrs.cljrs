@@ -1,0 +1,7 @@
+(ns cljrs-probe.render-attrs
+  (:require [replicant.test-helper :as h]))
+;; Probe 23 ([:h1 "hi"], no attrs) passes. Does adding attributes (which drives
+;; the set-attribute/set-style/add-class path) trigger "not callable"?
+(println "26 render-attrs:"
+         (-> (h/render [:h1 {:title "t" :style {:color "red"} :class ["c"]} "hi"])
+             h/get-mutation-log-events h/summarize))
