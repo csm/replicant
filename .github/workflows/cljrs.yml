@@ -74,10 +74,8 @@ jobs:
             replicant.transition-test
 
       - name: Run pure-data tests blocked on cljrs runtime gaps (informational)
-        # These load now; remaining errors are runtime cljrs gaps tracked in
-        # doc/cljrs-port/STATUS.md (extend-via-metadata protocol dispatch, and
-        # any residual "not callable" cases). Tolerant: promotes to the gate once
-        # they pass.
+        # Remaining runtime cljrs gaps tracked in doc/cljrs-port/STATUS.md.
+        # Tolerant: promotes to the gate once they pass.
         run: |
           cljrs test \
             --src-path src \
@@ -85,6 +83,20 @@ jobs:
             replicant.alias-test \
             replicant.string-test \
             replicant.core-test || echo "(still blocked on cljrs runtime gaps -- see STATUS.md)"
+
+      - name: Same suites with Tier-1 IR lowering disabled (diagnostic)
+        # DIAGNOSTIC, not a workaround: cljrs's Tier-1 IR lowering miscompiles
+        # functions after ~10 calls ("not callable: <fn>", probe 36a). Running
+        # with --ir-threshold set high isolates the remaining genuine issues from that
+        # one bug: 206/235 assertions pass here vs ~20 with the default tiers.
+        # Remove once the IR tier is fixed upstream.
+        run: |
+          cljrs --ir-threshold 100000000 test \
+            --src-path src \
+            --src-path test \
+            replicant.alias-test \
+            replicant.string-test \
+            replicant.core-test || echo "(remaining non-tier issues -- see STATUS.md)"
 
       - name: cljrs reader/feature probes (diagnostic)
         # Runs LAST so the PASS/FAIL matrix lands at the tail of the log (it was

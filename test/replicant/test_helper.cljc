@@ -3,10 +3,20 @@
             [clojure.walk :as walk]
             [replicant.mutation-log :as mutation-log]))
 
+(defn postwalk* [f form]
+  ;; DIAGNOSTIC ONLY (uncommitted): avoids (into (empty form) ...) which cljrs
+  ;; rejects for metadata-carrying targets.
+  (f (cond
+       (map? form) (reduce-kv (fn [m k v] (assoc m (postwalk* f k) (postwalk* f v))) {} form)
+       (vector? form) (mapv #(postwalk* f %) form)
+       (seq? form) (doall (map #(postwalk* f %) form))
+       (set? form) (set (map #(postwalk* f %) form))
+       :else form)))
+
 (defn get-mutation-log-events [renderer]
   (->> renderer :el :log
        (remove (comp #{:get-child :get-parent-node} first))
-       (walk/postwalk
+       (postwalk*
         (fn [x]
           (if (:text x)
             (:text x)
@@ -39,8 +49,12 @@
   (keyword (str tag-name (when id (str "#" id)))))
 
 (defn format-element [el]
-  (if (instance? #?(:clj clojure.lang.Atom
-                    :cljs cljs.core/Atom) el)
+  ;; cljrs provides clojure.core/atom? and does not map clojure.lang.Atom (see
+  ;; mutation-log/atom?); without a :rust arm the conditional splices nothing
+  ;; and instance? is called with one arg.
+  (if #?(:rust (clojure.core/atom? el)
+         :default (instance? #?(:clj clojure.lang.Atom
+                                :cljs cljs.core/Atom) el))
     (format-element @el)
     (if (:tag-name el)
       (vec (remove blank? [(get-tag-name el) (get-text el)]))

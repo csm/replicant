@@ -225,6 +225,46 @@ both with isolating probes:
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.
 
+### Status at cljrs 0.1.207 — the big one: Tier-1 IR lowering miscompiles
+
+0.1.207 confirmed fixing bugs 1–3 (`map-entry?`, meta-map `empty`, `#() @%` —
+probes 35a/b/d pass). Local bisection then found the dominant remaining bug plus
+two smaller ones:
+
+4. **`into` rejects metadata-carrying targets** (successor to the `empty` fix,
+   which now correctly preserves meta):
+   `(into (with-meta [] {:p 1}) [1 2])` → "wrong type: expected collection, got
+   vector" — while `conj`/`assoc`/`reduce conj`/`transient` on the same values
+   work. Breaks `clojure.walk` (`(into (empty form) …)`) → this is what CI
+   probes 23/26–29 show as "expected collection, got map". Repro in probe 35
+   (35c-equivalent) and `t29`/`t30` bisection.
+5. **Tier-1 IR-interpreter lowering breaks functions — THE dominant bug.**
+   An identical expression succeeds on iterations 0–9 and fails from iteration
+   ~10 **permanently, process-wide per function** with "not callable: <fn>"
+   (probe 36a). It is the IR tier, not the Cranelift JIT:
+   `--jit-threshold 1000000` changes nothing (and Cranelift isn't engaged at
+   defaults), while **`--ir-threshold 100000000` eliminates it completely** —
+   the 50×-loop goes 40 fails → 0, and the three suites go from ~20 to
+   **206 of 235 assertions passing** (alias-test and string-test fully green).
+   This bug also explains the historical `cljrs test` vs `cljrs run` "not
+   callable" discrepancy (the test command executes enough code to cross the
+   ~10-call promotion threshold; cold one-shot probes never did). The leaf
+   functions are fine — direct monomorphic and polymorphic warm loops of e.g.
+   `get-hiccup-headers` don't break it; the corruption appears when promoted
+   callers invoke callees (inline-cache shape), so the repro needs a nested
+   call graph like the probe's render loop.
+6. **Namespaced-keyword `:keys` destructuring doesn't bind** (probe 36b/c):
+   `(let [{:keys [ui/dest]} {:ui/dest 2}] dest)` → "unbound symbol: dest";
+   `{:ui/keys [dest]}` → "unsupported binding pattern". Used by core-test's
+   alias tests (`(fn [{:keys [ui/dest]} children] …)`).
+
+**With the IR tier disabled** (`--ir-threshold 100000000`, diagnostic step in
+CI), remaining core-test tally is 11 failures + 18 errors: the errors are bugs
+4 and 6 above plus a tail to triage; the failures are semantic diffs to examine
+once those clear. Port-side fix included: `test_helper.cljc`'s `format-element`
+had no `:rust` arm for its `instance?` Atom check (same fix as
+`mutation-log/atom?`).
+
 ### Minor: `unchecked-int` not bound (cljrs 0.1.196)
 
 `unchecked-inc-int` / `unchecked-add-int` / `unchecked-dec-int` are bound, but the
