@@ -1,0 +1,9 @@
+(ns cljrs-probe.set-attributes
+  (:require [replicant.core :as core]
+            [replicant.mutation-log :as ml]))
+;; Apply attributes directly through the real fake renderer + protocol dispatch,
+;; bypassing full reconcile. Isolates set-attributes/set-attr-val/set-attribute.
+(let [el (atom {:tag-name "h1" :replicant.mutation-log/id 1})
+      r  (ml/create-renderer {})]
+  (core/set-attributes r el {:title "t"})
+  (println "33 set-attributes:" (:title @el)))
