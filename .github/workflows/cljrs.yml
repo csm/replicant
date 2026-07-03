@@ -95,10 +95,12 @@ jobs:
           echo "cljrs feature matrix:"
           for f in examples/cljrs-wasm/probes/*.cljrs; do
             # src/test on the path so require-based probes can resolve replicant.*
+            # Truncate output to one 300-char line so a failing probe's (sometimes
+            # pathologically nested/escaped) error blob can't swamp the matrix.
             if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
-              echo "PASS  $(basename "$f")  -> $out"
+              echo "PASS  $(basename "$f")  -> $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
             else
-              echo "FAIL  $(basename "$f")  -> $out"
+              echo "FAIL  $(basename "$f")  -> $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
             fi
           done
           exit 0

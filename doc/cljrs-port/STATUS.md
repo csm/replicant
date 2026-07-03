@@ -191,10 +191,18 @@ both with isolating probes:
      expected 0".** The reconcile/diff path invokes a 0-arg fn with 1 arg (a plain
      `[:h1 {} "a"]`→`[:h1 {} "b"]` text update, no hooks).
 
-   Note: under `cljrs test` these same renders surface as "not callable: <fn>",
-   while `cljrs run` gives the WrongType / arity errors above — an
-   execution-tier discrepancy worth noting upstream. These two are the remaining
-   blockers for `core-test`.
+   Refined further (0.1.204): probe 29 (a plain `:title` attribute) also fails —
+   so it is not class/style-specific; **any attribute** triggers the WrongType.
+   Leading hypothesis: **cljrs sequence fns throw on `nil` instead of nil-punning**
+   (a `:title`-only node has no classes/children, so the attribute path runs seq
+   ops over `nil`). Probe 30 tests `seq`/`map`/`keep`/`reduce`/`into`/`count`/
+   `reduce-kv`/`first`/`next` on `nil`. If those throw, it is the root cause of
+   the WrongType errors (and pervasive).
+
+   Notes to flag upstream: (a) under `cljrs test` these renders surface as "not
+   callable: <fn>" while `cljrs run` gives WrongType/arity — an execution-tier
+   discrepancy; (b) a failing probe prints an error blob with exponentially
+   nested backslash-escaping — a cljrs error-formatting bug (cosmetic).
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.
