@@ -181,31 +181,46 @@ both with isolating probes:
    - 77 of 141 `core-test` errors are hookless plain renders — but they carry
      **attributes** (`:style`/`:class`/`:innerHTML`/`:replicant/key`) and/or are
      **re-renders** (`(-> (h/render A) (h/render B) …)`).
-   **Bisected (0.1.204).** Both reproduce under plain `cljrs run` (interpreted),
-   with distinct, concrete errors — no longer "not callable":
-   - **probe 26 — single render *with attributes* → "wrong type: expected
-     collection, got nil" (WrongType).** Split into 26 (`:class`), 28 (`:style`),
-     29 (plain attr) to pinpoint which attribute path passes nil to a collection
-     op.
-   - **probe 27 — a re-render/update → "Wrong number of args (1) passed to fn;
-     expected 0".** The reconcile/diff path invokes a 0-arg fn with 1 arg (a plain
-     `[:h1 {} "a"]`→`[:h1 {} "b"]` text update, no hooks).
+   **SOLVED (local interactive bisection on cljrs 0.1.204).** With cljrs
+   installed locally (only the crates.io *API* is proxy-blocked; `cargo install
+   cljrs` works), the remaining failures were traced to **three concrete cljrs
+   bugs**, each with a one-line repro (probe `35_upstream_repros.cljrs`,
+   verified locally):
 
-   Refined further (0.1.204): probe 29 (a plain `:title` attribute) also fails —
-   so it is not class/style-specific; **any attribute** triggers the WrongType.
-   Nil-punning hypothesis **refuted** — probe 30 shows `seq`/`map`/`keep`/`reduce`/
-   `into`/`count`/`reduce-kv`/`first`/`next` all handle `nil` correctly. Next
-   suspect: **iterating a map with entry destructuring.** `set-attributes`
-   (`core.cljc:571`) does `(run! (fn [[attr v]] …) attr-map)` and
-   `update-attributes` (`:537`) reduces over `(into (set (keys new)) (keys old))`;
-   probe 21 only tested `run!` over a *vector*. Probe 31 tests `run!`/`map`/
-   `doseq`/`first`/`set`+`keys` over a map with `[k v]` destructuring — the exact
-   construct every attributed node hits.
+   1. **`map-entry?` returns true for plain 2-element vectors.**
+      `(map-entry? [:a 1])` → `true` (Clojure/CLJS: `false`; only real MapEntry
+      instances qualify). Consequence: `replicant.hiccup/hiccup?` returns false
+      for 2-element hiccup, so `[:h1 "hi"]` / `[:h1 {:title "t"}]` silently
+      render as *text nodes* containing the stringified form. This is why probes
+      23/24/34 "passed" with wrong output shapes.
+   2. **`(empty m)` on a map carrying metadata returns `nil`.**
+      `(empty (with-meta {:a 1} {:p 1}))` → `nil` (Clojure: `{}` with meta
+      preserved; plain `(empty {:a 1})` is correct). Consequence: `clojure.walk`
+      does `(into (empty form) …)` → `(into nil …)` → **"wrong type: expected
+      collection, got nil"**. Mutation-log node maps carry `{:parent …}`
+      metadata (`set-parent`), so `test-helper/get-mutation-log-events`
+      (`walk/postwalk` over the log) throws for any render that appended a node
+      — the entire WrongType wave. Replicant's engine itself is fine:
+      `create-node`, `update-children`, `reconcile`, and `ml/render` all succeed
+      when called directly (verified locally; 5 correct log events for an
+      attributed node).
+   3. **`%` under deref sugar `@%` is not counted by the `#()` arg scanner.**
+      `(#(:x @%) (atom {:x 1}))` → "arity error: expected 0, got 1"; `#(:x %)`
+      and `#(deref %)` are fine — any `#(… @% …)` compiles as a 0-arity fn.
+      Consequence: `mutation_log.cljc:32`'s `#(::id @%)` in `-replace-child`
+      breaks, which is precisely the text-node update path (probe 27; a local
+      bisect showed *only* "text change" fails among identical/attr-change/
+      attr-add/child-add/child-remove/tag-change updates).
 
-   Notes to flag upstream: (a) under `cljrs test` these renders surface as "not
-   callable: <fn>" while `cljrs run` gives WrongType/arity — an execution-tier
-   discrepancy; (b) a failing probe prints an error blob with exponentially
-   nested backslash-escaping — a cljrs error-formatting bug (cosmetic).
+   Also confirmed working locally: `update` at all arities, `walk/postwalk` over
+   plain and lazy structures, keyword lookup on meta-maps, nil-punning (probe
+   30), map-entry iteration (probe 31), `get-attrs`/`set-attributes` (32/33).
+
+   Notes to flag upstream (secondary): (a) under `cljrs test` these same errors
+   surface as "not callable: <fn>" while `cljrs run` gives the true
+   WrongType/arity errors — an execution-tier discrepancy that misled diagnosis;
+   (b) failing probes print error blobs with exponentially nested
+   backslash-escaping — an error-formatting bug (cosmetic).
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.
