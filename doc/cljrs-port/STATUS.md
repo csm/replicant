@@ -193,11 +193,14 @@ both with isolating probes:
 
    Refined further (0.1.204): probe 29 (a plain `:title` attribute) also fails —
    so it is not class/style-specific; **any attribute** triggers the WrongType.
-   Leading hypothesis: **cljrs sequence fns throw on `nil` instead of nil-punning**
-   (a `:title`-only node has no classes/children, so the attribute path runs seq
-   ops over `nil`). Probe 30 tests `seq`/`map`/`keep`/`reduce`/`into`/`count`/
-   `reduce-kv`/`first`/`next` on `nil`. If those throw, it is the root cause of
-   the WrongType errors (and pervasive).
+   Nil-punning hypothesis **refuted** — probe 30 shows `seq`/`map`/`keep`/`reduce`/
+   `into`/`count`/`reduce-kv`/`first`/`next` all handle `nil` correctly. Next
+   suspect: **iterating a map with entry destructuring.** `set-attributes`
+   (`core.cljc:571`) does `(run! (fn [[attr v]] …) attr-map)` and
+   `update-attributes` (`:537`) reduces over `(into (set (keys new)) (keys old))`;
+   probe 21 only tested `run!` over a *vector*. Probe 31 tests `run!`/`map`/
+   `doseq`/`first`/`set`+`keys` over a map with `[k v]` destructuring — the exact
+   construct every attributed node hits.
 
    Notes to flag upstream: (a) under `cljrs test` these renders surface as "not
    callable: <fn>" while `cljrs run` gives WrongType/arity — an execution-tier
