@@ -1,0 +1,4 @@
+(ns cljrs-probe.render-attr
+  (:require [replicant.test-helper :as h]))
+(println "29 render-attr:"
+         (-> (h/render [:h1 {:title "t"} "hi"]) h/get-mutation-log-events h/summarize))

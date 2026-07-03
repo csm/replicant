@@ -181,10 +181,20 @@ both with isolating probes:
    - 77 of 141 `core-test` errors are hookless plain renders — but they carry
      **attributes** (`:style`/`:class`/`:innerHTML`/`:replicant/key`) and/or are
      **re-renders** (`(-> (h/render A) (h/render B) …)`).
-   Probes 26 (single render *with* attributes) and 27 (re-render/update) bisect
-   whether "not callable" comes from the attribute-setting path, the
-   reconcile/update path, or is specific to `cljrs test` vs `cljrs run`. This is
-   now the sole remaining blocker for `core-test`.
+   **Bisected (0.1.204).** Both reproduce under plain `cljrs run` (interpreted),
+   with distinct, concrete errors — no longer "not callable":
+   - **probe 26 — single render *with attributes* → "wrong type: expected
+     collection, got nil" (WrongType).** Split into 26 (`:class`), 28 (`:style`),
+     29 (plain attr) to pinpoint which attribute path passes nil to a collection
+     op.
+   - **probe 27 — a re-render/update → "Wrong number of args (1) passed to fn;
+     expected 0".** The reconcile/diff path invokes a 0-arg fn with 1 arg (a plain
+     `[:h1 {} "a"]`→`[:h1 {} "b"]` text update, no hooks).
+
+   Note: under `cljrs test` these same renders surface as "not callable: <fn>",
+   while `cljrs run` gives the WrongType / arity errors above — an
+   execution-tier discrepancy worth noting upstream. These two are the remaining
+   blockers for `core-test`.
 
 Once these land, re-run: remaining assertion *failures* (semantic diffs, e.g. in
 `string-test`) can then be triaged.

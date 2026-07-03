@@ -1,0 +1,4 @@
+(ns cljrs-probe.render-style
+  (:require [replicant.test-helper :as h]))
+(println "28 render-style:"
+         (-> (h/render [:h1 {:style {:color "red"}} "hi"]) h/get-mutation-log-events h/summarize))
