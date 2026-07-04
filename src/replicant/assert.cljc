@@ -10,7 +10,7 @@
 (def ^:no-doc error (atom nil))
 
 (defn ^:no-doc assert? []
-  #?(:clj (env/enabled? :replicant/asserts? (env/dev?))))
+  #?(:rust false :clj (env/enabled? :replicant/asserts? (env/dev?))))
 
 (defmacro ^:no-doc enter-node [headers]
   (when (assert?)
