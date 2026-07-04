@@ -3,20 +3,10 @@
             [clojure.walk :as walk]
             [replicant.mutation-log :as mutation-log]))
 
-(defn postwalk* [f form]
-  ;; DIAGNOSTIC ONLY (uncommitted): avoids (into (empty form) ...) which cljrs
-  ;; rejects for metadata-carrying targets.
-  (f (cond
-       (map? form) (reduce-kv (fn [m k v] (assoc m (postwalk* f k) (postwalk* f v))) {} form)
-       (vector? form) (mapv #(postwalk* f %) form)
-       (seq? form) (doall (map #(postwalk* f %) form))
-       (set? form) (set (map #(postwalk* f %) form))
-       :else form)))
-
 (defn get-mutation-log-events [renderer]
   (->> renderer :el :log
        (remove (comp #{:get-child :get-parent-node} first))
-       (postwalk*
+       (walk/postwalk
         (fn [x]
           (if (:text x)
             (:text x)
