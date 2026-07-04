@@ -416,6 +416,17 @@ Verified locally (`cargo install cljrs --version =0.1.212`):
   eliminates it completely (clean **231 passed / 14 failed / 1 error** across
   all five suites, no regression from 0.1.211's baseline).
 
+  **It is the IR interpreter tier, not Cranelift JIT** — tested each flag in
+  isolation (3 fresh runs each): `--jit-threshold 100000000` alone (IR tier
+  left at its default) **still crashes**, 3/3 runs; `--ir-threshold 100000000`
+  alone (JIT left at its default) **never crashes**, 3/3 clean runs. So
+  Cranelift compilation is irrelevant here — disabling it changes nothing,
+  while disabling IR-tier promotion fixes it completely. This matches bugs 5
+  and 7, which were also purely IR-tier. Practically, only `--ir-threshold`
+  is needed for the CI workaround (Cranelift promotion is presumably gated
+  behind IR promotion anyway, so nothing reaches the JIT if nothing gets
+  IR-promoted).
+
   **The exact panic, found via `RUST_BACKTRACE=full`:**
   ```
   thread 'cljrs-main' panicked at rpds-1.2.1/src/vector/mod.rs:134:18:
