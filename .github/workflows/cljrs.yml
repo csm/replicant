@@ -33,8 +33,9 @@ env:
   # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
   # 0.1.204 fixes cross namespace extend-via-metadata
   # 0.1.207 fixes map entry types, metadata for empty, and deref sugar in anonymous functions
-  # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.207"
+  # 0.1.210 fixes IR mis-lowering, into with metadata, and keys destructuring for namespaced keys
+  #Bump this (the cache key picks it up automatically) to track newer releases.
+  CLJRS_VERSION: "0.1.210"
 
 jobs:
   pure-data-tests:
