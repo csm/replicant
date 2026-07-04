@@ -1,0 +1,38 @@
+(ns repro.caller
+  (:require [repro.macro-ns :as m]))
+
+;; Minimal, self-contained (no replicant dependency) reproduction of a cljrs
+;; Tier-1 IR-lowering bug. See ../../../../doc/cljrs-port/STATUS.md ("bug 5")
+;; for the full write-up and history of how this was narrowed down from a
+;; full Replicant render call down to this.
+;;
+;; Ingredients, ALL of which are necessary -- removing any one of them makes
+;; the bug disappear:
+;;   1. A macro (`m/m` here) defined in a SEPARATE namespace from its call
+;;      site, and invoked through a namespaced alias (`m/m`, not a bare `m`
+;;      defined locally).
+;;   2. The macro call wrapped inside an ordinary function (`get-it`) --
+;;      calling the macro directly at the top level, with no wrapping
+;;      function, does NOT reproduce the bug.
+;;   3. Roughly 50 or more calls to that wrapping function. The macro's
+;;      *expansion* can be almost anything (`inc` here; a bare `nth` call in
+;;      the original discovery); business logic complexity is irrelevant.
+;;
+;; Run:
+;;   cljrs run --src-path examples/cljrs-wasm/probes/ir-lowering-standalone-repro \
+;;     examples/cljrs-wasm/probes/ir-lowering-standalone-repro/repro/caller.cljrs
+;;
+;; Expected (correct): "60 calls succeeded, no error"
+;; Actual (cljrs <= 0.1.210, default settings): the 50th (or so) call throws
+;;   "Not a function: <fn> is not callable" -- and every call to `get-it`
+;;   anywhere in the process fails from that point on, permanently.
+;; Workaround: `cljrs --ir-threshold 100000000 run ...` avoids IR promotion
+;;   entirely and the loop completes without error.
+
+(defn get-it [x]
+  (m/m x))
+
+(dotimes [i 60]
+  (get-it i))
+
+(println "60 calls succeeded, no error")

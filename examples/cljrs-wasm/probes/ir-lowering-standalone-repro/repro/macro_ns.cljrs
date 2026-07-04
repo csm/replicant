@@ -1,0 +1,6 @@
+(ns repro.macro-ns)
+
+;; A completely trivial macro -- its body could be anything; `inc` is chosen
+;; only because it's the simplest possible expansion.
+(defmacro m [x]
+  `(inc ~x))

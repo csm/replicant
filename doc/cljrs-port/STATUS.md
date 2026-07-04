@@ -249,33 +249,56 @@ two smaller ones:
    runner executes enough calls to cross the promotion threshold; cold
    one-shot probes never did).
 
-   **Minimal reproduction** (`examples/cljrs-wasm/probes/37_ir_lowering_minimal.cljrs`,
-   verified 100% deterministic across repeated runs):
-   ```clojure
-   (ns repro (:require [replicant.core :as core]))
-   (def headers [:h1 nil nil nil {:title "t"} [] nil nil nil])
-   (dotimes [i 55] (core/get-attrs headers))
-   (println "55 calls succeeded, no error")
-   ```
-   Run with `cljrs run --src-path src <file>`. Expected: the println. Actual
-   (cljrs ≤ 0.1.210, default settings): throws around the 50th call and never
-   recovers. A single function (`replicant.core/get-attrs`), no protocol
-   dispatch, no renderer, no rendering pipeline at all — purely a cumulative
-   per-function call-count threshold (~50 for this function). Argument
-   identity doesn't matter (same object every call, or a fresh literal each
-   call — both fail at exactly the same count).
+   **Fully self-contained minimal reproduction — zero Replicant dependency**
+   (`examples/cljrs-wasm/probes/ir-lowering-standalone-repro/`, verified
+   deterministic across 5+ repeated runs each direction):
 
-   Notably, **the bug could not be reproduced by re-implementing `get-attrs`'s
-   exact logic** (`parse-tag`/`get-hiccup-headers`/`get-attrs`/`prep-attrs`/
-   `get-classes`, byte-for-byte, including the real `hget` accessor macros from
-   `hiccup_headers.cljc`) in a small standalone namespace that doesn't require
-   `replicant.core` — even at 100+ calls. So the trigger isn't in the
-   function's business logic; it's specific to how *this particular
-   already-compiled function, loaded from the actual (larger) `replicant.core`
-   namespace*, gets re-lowered by the IR tier around its Nth invocation. This
-   is a strong hint for whoever debugs it upstream, but black-box probing
-   couldn't narrow it further without cljrs-internal visibility into the IR
-   promotion/lowering pass itself.
+   `repro/macro_ns.cljrs`:
+   ```clojure
+   (ns repro.macro-ns)
+   (defmacro m [x] `(inc ~x))
+   ```
+   `repro/caller.cljrs`:
+   ```clojure
+   (ns repro.caller (:require [repro.macro-ns :as m]))
+   (defn get-it [x] (m/m x))
+   (dotimes [i 60] (get-it i))
+   (println "60 calls succeeded, no error")
+   ```
+   Run: `cljrs run --src-path examples/cljrs-wasm/probes/ir-lowering-standalone-repro
+   examples/cljrs-wasm/probes/ir-lowering-standalone-repro/repro/caller.cljrs`.
+   Expected: the println. Actual (cljrs ≤ 0.1.210, default settings): throws
+   "Not a function: `<fn>` is not callable" around the 50th call and every
+   subsequent call to `get-it` fails for the rest of the process.
+   `cljrs --ir-threshold 100000000 run …` (same command) completes cleanly.
+
+   This was narrowed down from the original full-Replicant-render repro by
+   systematic bisection, discarding each ingredient that turned out not to be
+   necessary:
+   - Not the rendering/reconcile machinery, not protocol dispatch, not a
+     renderer at all — a single function (`replicant.core/get-attrs`) called
+     directly reproduces it just as well.
+   - Not `get-attrs`'s business logic either: re-implementing it byte-for-byte
+     (`parse-tag`/`get-hiccup-headers`/`prep-attrs`/`get-classes`) in a
+     standalone namespace that doesn't require `replicant.core` does **not**
+     reproduce it, even past 100 calls.
+   - What *is* necessary, isolated one variable at a time: (a) a `defmacro`
+     defined in a **separate namespace** from its use site and invoked through
+     a **namespaced alias** (a same-file/local macro does not trigger it); (b)
+     the macro call **wrapped inside an ordinary function** (calling the macro
+     directly at the top level of the loop, with no wrapping function, does
+     not trigger it); (c) roughly **50 or more calls** to that wrapping
+     function. The macro's expansion is irrelevant to complexity — `` `(inc
+     ~x)`` reproduces it exactly as well as `` `(nth ~x ~k)`` (Replicant's
+     `hget` accessor macro, the original suspect). Argument identity doesn't
+     matter (same object vs. a fresh value each call — both fail at the same
+     count).
+
+   In short: **any cross-namespace macro-generated function call site, once
+   warmed past ~50 invocations, corrupts** under cljrs's Tier-1 IR lowering.
+   Given how central `defmacro` + cross-namespace `require` is to ordinary
+   Clojure code, this should be straightforward for the cljrs maintainer to
+   reproduce and fix from the two files above.
 6. **Namespaced-keyword `:keys` destructuring doesn't bind** (probe 36b/c):
    `(let [{:keys [ui/dest]} {:ui/dest 2}] dest)` → "unbound symbol: dest";
    `{:ui/keys [dest]}` → "unsupported binding pattern". Used by core-test's
