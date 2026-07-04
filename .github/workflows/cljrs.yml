@@ -41,8 +41,9 @@ env:
   # default settings -- probe 36a still fails from iteration ~10 onward, and the
   # default-settings suites are still ~211 errors, same as before 0.1.210. The
   # diagnostic --ir-threshold step below remains necessary.
+  # 0.1.211 fixes cross namespace macro generated functions in IR lowerer
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.210"
+  CLJRS_VERSION: "0.1.211"
 
 jobs:
   pure-data-tests:
