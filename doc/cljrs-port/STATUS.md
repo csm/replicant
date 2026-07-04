@@ -239,20 +239,43 @@ two smaller ones:
    probes 23/26–29 show as "expected collection, got map". Repro in probe 35
    (35c-equivalent) and `t29`/`t30` bisection.
 5. **Tier-1 IR-interpreter lowering breaks functions — THE dominant bug.**
-   An identical expression succeeds on iterations 0–9 and fails from iteration
-   ~10 **permanently, process-wide per function** with "not callable: <fn>"
-   (probe 36a). It is the IR tier, not the Cranelift JIT:
-   `--jit-threshold 1000000` changes nothing (and Cranelift isn't engaged at
-   defaults), while **`--ir-threshold 100000000` eliminates it completely** —
-   the 50×-loop goes 40 fails → 0, and the three suites go from ~20 to
-   **206 of 235 assertions passing** (alias-test and string-test fully green).
-   This bug also explains the historical `cljrs test` vs `cljrs run` "not
-   callable" discrepancy (the test command executes enough code to cross the
-   ~10-call promotion threshold; cold one-shot probes never did). The leaf
-   functions are fine — direct monomorphic and polymorphic warm loops of e.g.
-   `get-hiccup-headers` don't break it; the corruption appears when promoted
-   callers invoke callees (inline-cache shape), so the repro needs a nested
-   call graph like the probe's render loop.
+   An identical call succeeds for its first ~49 invocations and fails from
+   the ~50th call onward, **permanently, process-wide, for that function** —
+   with "not callable" (`cljrs test`) or "Not a function: `<fn>` is not
+   callable" (`cljrs run`). It is the IR tier, not the Cranelift JIT:
+   `--jit-threshold` changes nothing (Cranelift isn't engaged at defaults),
+   while **`--ir-threshold 100000000` eliminates it completely**. This also
+   explains the historical `cljrs test` vs `cljrs run` discrepancy (the test
+   runner executes enough calls to cross the promotion threshold; cold
+   one-shot probes never did).
+
+   **Minimal reproduction** (`examples/cljrs-wasm/probes/37_ir_lowering_minimal.cljrs`,
+   verified 100% deterministic across repeated runs):
+   ```clojure
+   (ns repro (:require [replicant.core :as core]))
+   (def headers [:h1 nil nil nil {:title "t"} [] nil nil nil])
+   (dotimes [i 55] (core/get-attrs headers))
+   (println "55 calls succeeded, no error")
+   ```
+   Run with `cljrs run --src-path src <file>`. Expected: the println. Actual
+   (cljrs ≤ 0.1.210, default settings): throws around the 50th call and never
+   recovers. A single function (`replicant.core/get-attrs`), no protocol
+   dispatch, no renderer, no rendering pipeline at all — purely a cumulative
+   per-function call-count threshold (~50 for this function). Argument
+   identity doesn't matter (same object every call, or a fresh literal each
+   call — both fail at exactly the same count).
+
+   Notably, **the bug could not be reproduced by re-implementing `get-attrs`'s
+   exact logic** (`parse-tag`/`get-hiccup-headers`/`get-attrs`/`prep-attrs`/
+   `get-classes`, byte-for-byte, including the real `hget` accessor macros from
+   `hiccup_headers.cljc`) in a small standalone namespace that doesn't require
+   `replicant.core` — even at 100+ calls. So the trigger isn't in the
+   function's business logic; it's specific to how *this particular
+   already-compiled function, loaded from the actual (larger) `replicant.core`
+   namespace*, gets re-lowered by the IR tier around its Nth invocation. This
+   is a strong hint for whoever debugs it upstream, but black-box probing
+   couldn't narrow it further without cljrs-internal visibility into the IR
+   promotion/lowering pass itself.
 6. **Namespaced-keyword `:keys` destructuring doesn't bind** (probe 36b/c):
    `(let [{:keys [ui/dest]} {:ui/dest 2}] dest)` → "unbound symbol: dest";
    `{:ui/keys [dest]}` → "unsupported binding pattern". Used by core-test's
