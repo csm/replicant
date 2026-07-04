@@ -1,0 +1,58 @@
+(ns cljrs-probe.str-nil-corruption)
+;; Minimal, fully self-contained (no replicant dependency) reproduction of a
+;; NEW symptom of the same IR-tier promotion defect that caused the "not
+;; callable" bug (fixed in cljrs 0.1.211 -- see
+;; ../ir-lowering-standalone-repro/). This one produces silently WRONG DATA
+;; instead of throwing, which is worse: nothing signals that anything is
+;; wrong.
+;;
+;; `(str tag id)` where `id` is nil should equal `tag` (Clojure's `str`
+;; treats nil as the empty string). Called directly at the top level, this is
+;; always correct. But wrapped in an ordinary function and called ~50+ times,
+;; cljrs's IR tier corrupts it: `(str "h1" nil)` starts returning "h1nil"
+;; (the literal text "nil" appended) instead of "h1".
+;;
+;; This exactly explains the widespread new test failures seen in Replicant's
+;; core-test suite under cljrs 0.1.211 at default settings -- e.g.
+;; `get-tag-name` in the test helper does
+;;   (keyword (str tag-name (when id (str "#" id))))
+;; and every hiccup tag summary comes out as "h1nil" instead of "h1" once
+;; get-tag-name has been called ~50 times.
+;;
+;; Ingredients, both necessary (removing either makes the bug disappear):
+;;   1. The `str` call must be wrapped inside an ordinary function (a bare
+;;      top-level `(str "h1" nil)` in a loop is unaffected).
+;;   2. ~50 or more calls to that wrapping function.
+;; No macro and no cross-namespace require are needed this time (contrast
+;; with the "not callable" bug, which needed a cross-namespace macro) --
+;; this is a simpler trigger for what appears to be the same underlying
+;; promotion/re-lowering defect.
+;;
+;; Run: cljrs run examples/cljrs-wasm/probes/38_str_nil_corruption.cljrs
+;; Expected (correct): "60 calls succeeded, no error"
+;; Actual (cljrs 0.1.211, default settings): several "MISMATCH" lines from
+;;   call ~50 onward, each showing "h1nil" instead of "h1".
+;; Workaround: `cljrs --ir-threshold 100000000 run ...` avoids IR promotion
+;;   entirely and the loop completes with no mismatches.
+;;
+;; NOTE: cljrs 0.1.211 also produces occasional non-deterministic crashes
+;; (sometimes a graceful "thread panicked" exit, sometimes a raw SIGSEGV) when
+;; running Replicant's full core-test suite at default settings -- also
+;; eliminated by --ir-threshold 100000000. We were NOT able to reduce the
+;; crash to a small deterministic repro like this one (several synthetic
+;; multi-function/high-iteration attempts did not trigger it); it appears to
+;; need the scale/diversity of the full test suite. Flagging it as a known,
+;; unminimized symptom of the same defect family rather than guessing further.
+
+(defn get-tag [tag id]
+  (str tag id))
+
+(def mismatches (atom []))
+(dotimes [i 60]
+  (let [r (get-tag "h1" nil)]
+    (when (not= r "h1")
+      (swap! mismatches conj [i r]))))
+
+(if (seq @mismatches)
+  (println "MISMATCHES:" (count @mismatches) "first:" (first @mismatches))
+  (println "60 calls succeeded, no error"))

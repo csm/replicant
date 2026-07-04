@@ -360,6 +360,59 @@ with `#`/`[]` character classes. This validates the `:rust` renderer and the
 `:rust` reader-conditional branches added to `core.cljc`/`string.cljc` — they
 load and run; the blockers are purely the two reader gaps above.
 
+### Status at cljrs 0.1.211 — bug 5 ("not callable") FIXED; new symptoms of the same defect family
+
+Verified locally (`cargo install cljrs --version =0.1.211`):
+
+- **Bug 5, the cross-namespace-macro "not callable" corruption — FIXED.** Both
+  the fully self-contained repro
+  (`examples/cljrs-wasm/probes/ir-lowering-standalone-repro/`) and probe 37
+  (real `replicant.core/get-attrs`) now complete cleanly across 5+ repeated
+  runs each.
+- **But running Replicant's actual suites at default settings still shows
+  ~211 errors** (`replicant.core-test` alone: 0 passed of its assertions, many
+  `FAIL`s, and non-deterministic **process crashes** — sometimes a graceful
+  `thread panicked: Any { .. }` exit, sometimes a raw `SIGSEGV`, at a different
+  point in the suite each run). `--ir-threshold 100000000` avoids all of it —
+  back to the same clean **~221 passed / ~13 failed / 1 error** baseline as
+  0.1.210. So this is **not a regression**, but the *same underlying IR-tier
+  promotion defect resurfacing as new symptoms* rather than being fully fixed:
+
+  7. **Silent string corruption — `(str x nil)` returns `x` + literal "nil"
+     text once its enclosing function is called ~50+ times.** Minimal,
+     self-contained repro
+     (`examples/cljrs-wasm/probes/38_str_nil_corruption.cljrs`, no dependencies
+     at all, not even a macro this time):
+     ```clojure
+     (defn get-tag [tag id] (str tag id))
+     (dotimes [i 60] (get-tag "h1" nil))  ; correct: always "h1"
+     ```
+     From call ~50 onward this silently returns `"h1nil"` instead of `"h1"`.
+     This is *worse* than bug 5: it produces wrong data with no error at all.
+     It exactly explains the widespread new Replicant test failures: the test
+     helper's `get-tag-name` does `(keyword (str tag-name (when id (str "#"
+     id))))`, and once warmed up, every tag summary comes out as `"h1nil"`
+     instead of `"h1"`. Needs only: the `str` call wrapped in an ordinary
+     function (a bare top-level call is unaffected), and ~50+ calls to it — no
+     macro, no cross-namespace `require` needed this time, simpler than bug 5's
+     trigger.
+  8. **Non-deterministic crashes** (graceful panic or SIGSEGV, varying by run)
+     under the full core-test suite at default settings. Also eliminated by
+     `--ir-threshold 100000000`. We deliberately did **not** force a minimal
+     repro here: several synthetic attempts (bigger iteration counts, mixes of
+     several simple functions warming up together) did not reproduce it, and
+     crash bugs are inherently harder to bisect black-box than deterministic
+     wrong-output bugs. Flagging it honestly as an open, unminimized symptom of
+     the same defect family (rather than guessing) — probably easier for the
+     cljrs maintainer to chase directly once bugs 5/7 are fixed at the root.
+
+  **Recommendation to whoever fixes this upstream:** given three distinct
+  symptoms now observed from what looks like one underlying IR-tier
+  promotion/re-lowering defect ("not callable" → fixed in 0.1.211; string
+  corruption; crashes), it's likely more effective to find and fix the root
+  cause in the promotion/lowering pass itself than to patch each symptom as it
+  is reported.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1

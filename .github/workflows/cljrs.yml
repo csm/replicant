@@ -41,7 +41,17 @@ env:
   # default settings -- probe 36a still fails from iteration ~10 onward, and the
   # default-settings suites are still ~211 errors, same as before 0.1.210. The
   # diagnostic --ir-threshold step below remains necessary.
-  # 0.1.211 fixes cross namespace macro generated functions in IR lowerer
+  # 0.1.211 fixes cross namespace macro generated functions in IR lowerer.
+  # Verified locally: the "not callable" corruption is genuinely fixed (5+
+  # repeated runs of examples/cljrs-wasm/probes/ir-lowering-standalone-repro/
+  # and probe 37 all pass). BUT default-settings suites are still ~211 errors,
+  # because the same underlying IR-tier promotion defect now surfaces as NEW
+  # symptoms instead: silent string corruption (`(str x nil)` returns "xnil"
+  # once its wrapping fn is called ~50+ times -- probe 38, zero dependencies,
+  # not even a macro) and non-deterministic process crashes (graceful panic or
+  # SIGSEGV) under the full core-test suite. Both are eliminated by
+  # --ir-threshold, same as before. See STATUS.md "0.1.211" for the full
+  # writeup. The diagnostic --ir-threshold step below remains necessary.
   # Bump this (the cache key picks it up automatically) to track newer releases.
   CLJRS_VERSION: "0.1.211"
 
@@ -94,11 +104,15 @@ jobs:
             replicant.core-test || echo "(still blocked on cljrs runtime gaps -- see STATUS.md)"
 
       - name: Same suites with Tier-1 IR lowering disabled (diagnostic)
-        # DIAGNOSTIC, not a workaround: cljrs's Tier-1 IR lowering miscompiles
-        # functions after ~10 calls ("not callable: <fn>", probe 36a). Running
-        # with --ir-threshold set high isolates the remaining genuine issues from that
-        # one bug: 206/235 assertions pass here vs ~20 with the default tiers.
-        # Remove once the IR tier is fixed upstream.
+        # DIAGNOSTIC, not a workaround: cljrs's Tier-1 IR-tier promotion pass has
+        # a defect that has surfaced under several symptoms across versions --
+        # "not callable" (fixed 0.1.211), silent string corruption (probe 38),
+        # and non-deterministic crashes (graceful panic or SIGSEGV) -- all tied
+        # to functions called ~50+ times. Running with --ir-threshold set high
+        # isolates the remaining genuine issues from all of that: ~221/235
+        # assertions pass here vs ~19 with the default tiers (0.1.211). Remove
+        # once the IR tier's promotion/re-lowering defect is fixed at the root
+        # upstream (see doc/cljrs-port/STATUS.md).
         run: |
           cljrs --ir-threshold 100000000 test \
             --src-path src \
