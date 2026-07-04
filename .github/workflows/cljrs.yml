@@ -52,8 +52,9 @@ env:
   # SIGSEGV) under the full core-test suite. Both are eliminated by
   # --ir-threshold, same as before. See STATUS.md "0.1.211" for the full
   # writeup. The diagnostic --ir-threshold step below remains necessary.
+  # 0.1.212 fixes nil handling for str under IR lowering
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.211"
+  CLJRS_VERSION: "0.1.212"
 
 jobs:
   pure-data-tests:
