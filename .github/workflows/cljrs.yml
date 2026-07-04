@@ -33,8 +33,15 @@ env:
   # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
   # 0.1.204 fixes cross namespace extend-via-metadata
   # 0.1.207 fixes map entry types, metadata for empty, and deref sugar in anonymous functions
-  # 0.1.210 fixes IR mis-lowering, into with metadata, and keys destructuring for namespaced keys
-  #Bump this (the cache key picks it up automatically) to track newer releases.
+  # 0.1.210 intends to fix IR mis-lowering, into with metadata, and keys
+  # destructuring for namespaced keys. Verified locally: `into`-with-metadata and
+  # namespaced :keys destructuring ARE fixed (probes 36b/36c pass; the
+  # --ir-threshold-high suites go from 206/235 passing (18 errors) at 0.1.207 to
+  # 221/235 (1 error) here). BUT the IR mis-lowering itself is NOT fixed at
+  # default settings -- probe 36a still fails from iteration ~10 onward, and the
+  # default-settings suites are still ~211 errors, same as before 0.1.210. The
+  # diagnostic --ir-threshold step below remains necessary.
+  # Bump this (the cache key picks it up automatically) to track newer releases.
   CLJRS_VERSION: "0.1.210"
 
 jobs:

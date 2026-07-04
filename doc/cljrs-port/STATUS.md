@@ -265,6 +265,38 @@ once those clear. Port-side fix included: `test_helper.cljc`'s `format-element`
 had no `:rust` arm for its `instance?` Atom check (same fix as
 `mutation-log/atom?`).
 
+### Status at cljrs 0.1.210 — bugs 4 and 6 confirmed fixed; bug 5 (IR lowering) NOT fixed
+
+Verified locally (`cargo install cljrs --version =0.1.210`):
+
+- **Bug 6 (namespaced `:keys` destructuring) — FIXED.** Probes 36b/36c now
+  return the correct bound values.
+- **Bug 4 (`into` with metadata) — FIXED** (inferred from the error-count drop
+  below; no more "expected collection, got …" errors under the IR-disabled run).
+- **Bug 5 (Tier-1 IR lowering) — still broken at default settings.** Probe 36a
+  is unchanged: the identical-expression loop still fails from iteration ~10
+  onward. Consequently the three suites at **default settings** are still
+  **19 passed / 0 failed / 211 errors** — essentially unmoved from 0.1.207. The
+  cljrs 0.1.210 changelog says it "fixes IR mis-lowering"; that is not borne out
+  by this repro. **This remains the top-priority upstream fix** — it is what
+  blocks the real (non-diagnostic) CI gate.
+- **With `--ir-threshold 100000000`** (bypassing the buggy tier), the suites
+  jump from 0.1.207's 206 passed/11 failed/18 errors to **221 passed / 13 failed
+  / 1 error** — i.e. once bugs 4 and 6 are factored out, only genuine
+  assertion-level issues remain:
+  - The single error is `regression-tests`: "runtime error: cannot deref nil".
+  - Most of the 13 failures are in `unmounting-test` and share one shape: a
+    node that should be fully removed from the rendered tree instead shows up
+    as a stray `nil` child (e.g. `[:div [:span "d"] [:span "c"] nil [:span
+    "b"]]` where `[:span "b"]` alone was expected). Several of the affected
+    tests pass a **quoted list literal** as a hiccup children collection
+    (`` '([:span {...}] ) ``) — a construct not covered by any existing probe.
+    Whether this is a genuine `:rust`-port issue or another cljrs gap (e.g.
+    `seq?`/`proper-seq?` behavior on quoted lists) has not yet been isolated;
+    flagging for a follow-up probe rather than guessing.
+  - One failure is in `event-handler-test` ("Changes handler") and one in
+    `render-test` ("Ignores nil style") — not yet triaged.
+
 ### Minor: `unchecked-int` not bound (cljrs 0.1.196)
 
 `unchecked-inc-int` / `unchecked-add-int` / `unchecked-dec-int` are bound, but the
