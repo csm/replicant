@@ -398,13 +398,65 @@ Verified locally (`cargo install cljrs --version =0.1.211`):
      trigger.
   8. **Non-deterministic crashes** (graceful panic or SIGSEGV, varying by run)
      under the full core-test suite at default settings. Also eliminated by
-     `--ir-threshold 100000000`. We deliberately did **not** force a minimal
-     repro here: several synthetic attempts (bigger iteration counts, mixes of
-     several simple functions warming up together) did not reproduce it, and
-     crash bugs are inherently harder to bisect black-box than deterministic
-     wrong-output bugs. Flagging it honestly as an open, unminimized symptom of
-     the same defect family (rather than guessing) — probably easier for the
-     cljrs maintainer to chase directly once bugs 5/7 are fixed at the root.
+     `--ir-threshold 100000000`. See "Status at cljrs 0.1.212" below for the
+     precise panic location found after bugs 5 and 7 were fixed (which removed
+     enough noise to see it clearly).
+
+### Status at cljrs 0.1.212 — bug 7 (str corruption) FIXED; bug 8 (crash) persists, now precisely located
+
+Verified locally (`cargo install cljrs --version =0.1.212`):
+
+- **Bug 7 (str-nil corruption) — FIXED.** Probe 38 passes cleanly across 3
+  repeated runs (`60 calls succeeded, no error`); bug 5's repros still pass
+  too (no regression).
+- **Bug 8 (the crash) persists**, unchanged in character: 4 of 5 fresh runs of
+  `cljrs test --src-path src --src-path test replicant.core-test` crashed
+  (mostly raw `SIGSEGV`, occasionally a graceful `thread panicked`), at a
+  different point in the suite each time. `--ir-threshold 100000000` still
+  eliminates it completely (clean **231 passed / 14 failed / 1 error** across
+  all five suites, no regression from 0.1.211's baseline).
+
+  **The exact panic, found via `RUST_BACKTRACE=full`:**
+  ```
+  thread 'cljrs-main' panicked at rpds-1.2.1/src/vector/mod.rs:134:18:
+  index out of bounds: the len is 2 but the index is 8
+  ```
+  — a panic inside `rpds` (the Rust persistent-data-structures crate cljrs
+  uses internally for persistent vectors), while indexing a vector whose
+  actual length is 2 at position 8. The **same underlying situation also
+  surfaces gracefully**, elsewhere in the same test run, as a catchable
+  Clojure-level exception: `"runtime error: index out of bounds: 8 >= 2"` (or
+  `"8 >= 0"` in a different run) on `replicant.core-test/unmounting-test`'s
+  *"Correctly removes unmounting node after multiple renders"* — one of the
+  tests already flagged (in the "genuine issues" list above) as failing with
+  a stray-`nil`-child symptom under `--ir-threshold`. **With the IR tier
+  disabled, that exact test only produces the mild, already-known assertion
+  *failure* — never an error, never a crash** — confirming this is the same
+  defect family as bugs 5 and 7, not a fifth, unrelated bug.
+
+  Index 8 is meaningful: it's the `text` slot in Replicant's 9-element
+  `hiccup-headers` tuple (see `hiccup_headers.cljc`). So somewhere in the
+  reconcile path, a vector that should be a full 9-element headers tuple
+  intermittently ends up truncated to 2 elements once the relevant
+  construction/access code has been called enough times to be promoted —
+  and depending on *which* tier ends up performing the out-of-range read, it
+  either raises a safe, catchable error (interpreter tier) or reads
+  out-of-bounds memory directly, causing an actual segfault (this strongly
+  suggests the JIT-compiled fast path skips or mis-implements the bounds
+  check that the interpreter performs safely).
+
+  **Attempted minimization (unsuccessful so far):** a synthetic repro mirroring
+  `hiccup_headers.cljc`'s real `create` macro — a `->`-threaded chain of 7
+  `conj` calls building a 9-element tuple from a 2-element base, invoked via a
+  cross-namespace macro alias, called 60 times — did **not** reproduce the
+  truncation (all 60 calls produced correctly-shaped 9-element vectors). So
+  the trigger needs more of the surrounding reconcile machinery than a bare
+  `conj`-chain; we have not isolated it further. The panic location above is a
+  much more direct lead for the maintainer than a black-box repro would be,
+  though: grep the IR-lowering/promotion code for anywhere a persistent
+  vector's length/capacity could be tracked incorrectly across a promotion
+  event, particularly around code that builds a vector via a chain of `conj`
+  calls (as opposed to a single vector literal).
 
   **Recommendation to whoever fixes this upstream:** given three distinct
   symptoms now observed from what looks like one underlying IR-tier
