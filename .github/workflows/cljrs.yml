@@ -66,8 +66,9 @@ env:
   # assertion failure. See STATUS.md "0.1.212" for the full writeup, including
   # an unsuccessful minimization attempt (a bare conj-chain builder does not
   # reproduce it -- the trigger needs more of the real reconcile machinery).
+  # 9.1.213 fixes a use-after-free bug when conj!/assoc! is IR lowered/region optimized
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.212"
+  CLJRS_VERSION: "0.1.213"
 
 jobs:
   pure-data-tests:
