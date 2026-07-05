@@ -167,12 +167,25 @@ jobs:
           echo "cljrs feature matrix:"
           for f in examples/cljrs-wasm/probes/*.cljrs; do
             # src/test on the path so require-based probes can resolve replicant.*
+            # Strip cranelift_jit's multiline IR dump (an INFO-level log line
+            # cljrs emits unconditionally when a hot function gets JIT'd --
+            # not gated by --debug/--trace, and RUST_LOG doesn't suppress it
+            # either) before truncating, or its hundreds of chars of "ss0 =
+            # explicit_slot ..." noise eat the whole 300-char budget and hide
+            # the probe's actual PASS/FAIL message. Note: PASS/FAIL here means
+            # the script ran without cljrs erroring/crashing -- probes that
+            # self-check and print e.g. "BAD: ..." on a semantic mismatch
+            # still exit 0, so still show as PASS; read the printed message,
+            # not just the PASS/FAIL word, to see if the probe's own
+            # assertion held.
             # Truncate output to one 300-char line so a failing probe's (sometimes
             # pathologically nested/escaped) error blob can't swamp the matrix.
             if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
-              echo "PASS  $(basename "$f")  -> $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
+              clean=$(printf '%s' "$out" | awk '/cranelift_jit/{skip=1} skip && /^}$/{skip=0; next} skip{next} {print}')
+              echo "PASS  $(basename "$f")  -> $(printf '%s' "$clean" | tr '\n' ' ' | cut -c1-300)"
             else
-              echo "FAIL  $(basename "$f")  -> $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
+              clean=$(printf '%s' "$out" | awk '/cranelift_jit/{skip=1} skip && /^}$/{skip=0; next} skip{next} {print}')
+              echo "FAIL  $(basename "$f")  -> $(printf '%s' "$clean" | tr '\n' ' ' | cut -c1-300)"
             fi
           done
           exit 0
