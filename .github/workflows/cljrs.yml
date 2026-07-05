@@ -86,8 +86,10 @@ env:
   # full writeup, including the negative results from smaller isolation
   # attempts (transient/conj! accumulator loop, test-helper's get-text-nodes
   # alone). The diagnostic --ir-threshold step below remains necessary.
+  # 0.1.214 fixes two additional region optimization bugs with get and
+  # ambiguous function calls
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.213"
+  CLJRS_VERSION: "0.1.214"
 
 jobs:
   pure-data-tests:
