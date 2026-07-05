@@ -541,6 +541,24 @@ here depends on cumulative call count across *multiple* functions/call sites
 (the scenario touches `render`, `reconcile`, and several accumulator-building
 functions internally), not just a single hot function.
 
+### Status at cljrs 0.1.214
+
+0.1.214's release notes cite two additional region-optimization fixes
+("`get` and ambiguous function calls"), but they don't touch this defect
+family. Verified locally:
+
+- Probes 37, 38, and the bug-5 standalone repro (`ir-lowering-standalone-repro`)
+  all still pass cleanly — no regression on the earlier fixes.
+- Probe 39 (`39_stale_children_after_promotion.cljrs`) still fails at
+  **exactly call 150**, unchanged from 0.1.213.
+- `core-test` at default settings: 63 and 66 failures across two fresh runs
+  (both 1 error, no crash) — squarely in the same ~55-70 range as 0.1.213.
+  `--ir-threshold` disabled: 13 failures, 1 error, unchanged.
+
+No movement on the stale-children symptom. Still the same recommendation:
+this is the fourth symptom of the one underlying IR-tier promotion defect,
+and the committed 150-call repro above remains the most precise lead for it.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1
