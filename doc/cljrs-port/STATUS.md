@@ -476,6 +476,71 @@ Verified locally (`cargo install cljrs --version =0.1.212`):
   cause in the promotion/lowering pass itself than to patch each symptom as it
   is reported.
 
+### Status at cljrs 0.1.213
+
+**The crash (bug 8) is fixed.** 5/5 fresh runs of
+`cljrs test --src-path src --src-path test replicant.core-test` at default
+settings complete with a graceful failure report, never a SIGSEGV or panic.
+
+**But a fourth symptom of the same defect family is now visible.** With the
+crash gone, `core-test` at default settings still shows far more failures
+than the `--ir-threshold`-disabled baseline of 13 (which stayed exactly 13,
+1 error, across the whole 0.1.211-0.1.213 range) — 5 fresh runs measured
+69, 56, 61, 67, 64 failures, always with exactly 1 error and never a crash.
+Non-deterministic in exact count, same as before, but reliably far above
+the 13-failure floor.
+
+Every one of these ~55-70 extra failures shares one shape: an **existing,
+already-rendered node's text or children reads back as `""`** on a later
+mutation-log event, even when that node's content is untouched by the
+render that produced the event. For example, re-rendering
+`[:h1 {:lang "en"} "Hello world"]` as `[:h1 {:lang "nb"} "Hello world"]`
+(text unchanged, only an attribute changes) logs
+`[:set-attribute [:h1 ""] "lang" "en" :to "nb"]` instead of
+`[:set-attribute [:h1 "Hello world"] "lang" "en" :to "nb"]`. The same pattern
+recurs across every keyed-move, remove-child, and insert-before failure in
+the suite — never on freshly-created nodes, always on nodes being
+*referenced again* after an earlier render already gave them real content.
+
+**Minimized, deterministic repro** (committed as
+`examples/cljrs-wasm/probes/39_stale_children_after_promotion.cljrs`):
+unlike bugs 5/7/8, this one needed no cross-namespace macro and no second,
+differently-shaped call site — a single scenario (render, re-render with an
+attribute-only change, read back the mutation log), called repeatedly in a
+loop, is sufficient. It just needs a much higher call count than the
+~50-call threshold seen for the earlier bugs: two separate runs both first
+fail at **exactly call 150**, never earlier, never later. Several smaller
+attempts to isolate it further came back negative and are recorded here so
+they aren't retried:
+- A synthetic `transient`/`conj!`/`persistent!` loop mirroring
+  `reconcile-children*`'s accumulator pattern (conditionally `conj!`ing real
+  values, `nil`, and via `cond->`), run 80-90 times: no corruption.
+- `test-helper`'s `get-text-nodes`/`get-text` (the `mapcat`-over-`:children`
+  reader), run 200 times against a fixed element map with no Replicant
+  reconciliation involved at all: no corruption. This rules out the test
+  helper's own read-side traversal as the culprit — the defect is in
+  construction/reconciliation, not in reading the result back.
+- The same single scenario run only 80 times (rather than 150+): no
+  corruption — this is why earlier spot-checks during the 0.1.213
+  investigation looked clean; the threshold for *this* symptom is higher
+  than the ~50-80 calls sufficient for bugs 5/7/8.
+
+This is consistent with the same root cause as bug 8 (a vector/collection
+that should retain its prior contents gets rebuilt empty or truncated once
+promoted), except 0.1.213 apparently fixed only the *memory-safety* half
+(no more out-of-bounds panics) and not the *data-integrity* half (the
+collection can still silently end up empty under promotion, just without
+touching memory it shouldn't).
+
+**Recommendation to whoever fixes this upstream:** same recommendation as
+above — this looks like the fourth symptom of one underlying IR-tier
+promotion/re-lowering defect around vector construction/mutation, not a new,
+unrelated bug. The committed repro's 150-call threshold (vs. ~50 for bugs
+5/7/8) may itself be a useful data point: it suggests promotion/re-lowering
+here depends on cumulative call count across *multiple* functions/call sites
+(the scenario touches `render`, `reconcile`, and several accumulator-building
+functions internally), not just a single hot function.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1

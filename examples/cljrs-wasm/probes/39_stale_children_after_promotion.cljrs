@@ -1,0 +1,48 @@
+(ns cljrs-probe.stale-children-after-promotion
+  (:require [replicant.mutation-log :as mutation-log]
+            [replicant.test-helper :as h]))
+
+;; New defect surfaced once cljrs 0.1.213 fixed the earlier crash (see
+;; STATUS.md "Status at cljrs 0.1.212", bug 8: rpds vector index-out-of-bounds
+;; panic). With the crash gone, `replicant.core-test` under default tier
+;; settings still shows ~55-70 failures (vs. a stable baseline of 13 with
+;; --ir-threshold disabled), all sharing one shape: an EXISTING, already
+;; -rendered node's text/children read back as "" on a later mutation-log
+;; event, even though that node's content never changed across the render
+;; that produced the event.
+;;
+;; This probe reduces the smallest failing core-test case ("Changes
+;; attribute") to a single scenario, called repeatedly in one process:
+;; render an <h1>"Hello world"</h1>, then re-render it with only an
+;; attribute change (text is untouched). Read back the :set-attribute
+;; mutation-log event and check the h1's text is still "Hello world".
+;;
+;; Unlike bugs 5/7/8, this one did NOT need a cross-namespace macro or a
+;; second, differently-shaped call site to trigger -- a single scenario,
+;; repeated, is enough; it just needs a much higher call count than the
+;; ~50-call threshold seen for the earlier bugs. Confirmed deterministic:
+;; two separate runs both first fail at exactly call 150 (300 renders + 150
+;; summarize calls in), never earlier, never later.
+;;
+;; Run: cljrs run --src-path src --src-path test \
+;;   examples/cljrs-wasm/probes/39_stale_children_after_promotion.cljrs
+;; Expected (correct): "N calls succeeded, text preserved" for any N.
+;; Actual (cljrs 0.1.213, default settings): fails starting at call 150,
+;; every time -- h1's text silently reads back as "".
+;; Workaround: --ir-threshold set very high avoids it, same as bugs 5/7/8.
+(defn scenario []
+  (-> (h/render [:h1 {:lang "en"} "Hello world"])
+      (h/render [:h1 {:lang "nb"} "Hello world"])
+      h/get-mutation-log-events
+      h/summarize))
+
+(def bad (atom []))
+(dotimes [i 200]
+  (let [result (scenario)
+        s (pr-str result)]
+    (when (re-find #"\[:h1 \"\"\]" s)
+      (swap! bad conj [i result]))))
+
+(if (seq @bad)
+  (println "BAD:" (count @bad) "first:" (first @bad))
+  (println "200 calls succeeded, text preserved"))

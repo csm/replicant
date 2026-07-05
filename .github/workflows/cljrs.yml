@@ -66,7 +66,26 @@ env:
   # assertion failure. See STATUS.md "0.1.212" for the full writeup, including
   # an unsuccessful minimization attempt (a bare conj-chain builder does not
   # reproduce it -- the trigger needs more of the real reconcile machinery).
-  # 9.1.213 fixes a use-after-free bug when conj!/assoc! is IR lowered/region optimized
+  # 0.1.213 fixes a use-after-free bug when conj!/assoc! is IR lowered/region
+  # optimized -- confirmed: the bug 8 crash (rpds vector index-out-of-bounds
+  # panic) is gone, 5/5 clean runs. BUT a 4th symptom of the same defect
+  # family remains: core-test at default settings still shows ~55-70
+  # failures vs. the --ir-threshold-disabled baseline of 13 (always 1 error,
+  # never a crash, on either side). Every extra failure is an existing,
+  # already-rendered node's text/children silently reading back as "" on a
+  # later mutation-log event, even though that node's content didn't change
+  # in the render that produced the event -- e.g. re-rendering
+  # [:h1 {:lang "en"} "Hello world"] with only the attribute changed logs
+  # [:set-attribute [:h1 ""] ...] instead of [:set-attribute [:h1 "Hello
+  # world"] ...]. Minimized to a single repeated scenario (no cross-namespace
+  # macro needed this time), deterministic at exactly call 150 across 2 runs:
+  # examples/cljrs-wasm/probes/39_stale_children_after_promotion.cljrs. Looks
+  # like 0.1.213 fixed the memory-safety half of bug 8 (no more out-of-bounds
+  # panics) but not the data-integrity half (the collection can still
+  # silently end up empty under promotion). See STATUS.md "0.1.213" for the
+  # full writeup, including the negative results from smaller isolation
+  # attempts (transient/conj! accumulator loop, test-helper's get-text-nodes
+  # alone). The diagnostic --ir-threshold step below remains necessary.
   # Bump this (the cache key picks it up automatically) to track newer releases.
   CLJRS_VERSION: "0.1.213"
 
