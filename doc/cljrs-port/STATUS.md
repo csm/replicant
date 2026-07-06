@@ -1,12 +1,18 @@
 # Replicant `:rust` (cljrs/WASM) backend — implementation status
 
-This tracks the in-progress port of Replicant to compile to WebAssembly via
-[clojurust](https://github.com/csm/clojurust) (`cljrs`). Background and the DOM
-API mapping are in [`cljrs-dom-requirements.md`](./cljrs-dom-requirements.md).
+This tracks the port of Replicant to run under
+[clojurust](https://github.com/csm/clojurust) (`cljrs`), both headless
+(the pure-data suites, via the native `cljrs` CLI) and in a real browser,
+editing real DOM (via `cljrs-wasm` + `cljrs-dom`, cljrs's browser REPL).
+Background and the DOM API mapping are in
+[`cljrs-dom-requirements.md`](./cljrs-dom-requirements.md).
 
-The upstream blockers are resolved: every `cljrs.dom` operation Replicant needs
-shipped in **cljrs 0.1.195**, and the library→WASM packaging CLI landed in
-**0.1.194**.
+Every `cljrs.dom` operation Replicant needs is real and working, verified
+directly (see "cljrs-wasm browser integration" below) — but **there is no
+`cljrs wasm` CLI command**; an earlier draft of this document and of
+`cljrs-dom-requirements.md` described one, and it doesn't exist in any
+released cljrs version checked. See "cljrs-wasm browser integration" for
+what the real path to the browser is and how it was found.
 
 ## What this branch implements
 
@@ -18,9 +24,16 @@ existing `:clj` / `:cljs` / `:squint` branch byte-for-byte unchanged.
   (`render`, `unmount`, `set-dispatch!`, `recall`) is shared; only the
   host-specific bits (`requestAnimationFrame`, clearing the root, error
   reporting, computed-style transitions, dev-key skip) branch on `:rust`. The
-  `replicant.env` require is now `:default`-only (env ships as `.clj`/`.cljs`
-  with no `.cljc`, so cljrs cannot load it; the `:rust` path skips dev-key
-  injection like `:squint` does).
+  `replicant.env` require is `:rust`-excluded via a splicing reader
+  conditional (env ships as `.clj`/`.cljs` with no `.cljc`, so cljrs cannot
+  load it; the `:rust` path skips dev-key injection like `:squint` does).
+  This file also carries five small, targeted workarounds for real cljrs
+  bugs found by actually exercising it in a browser (not reachable from the
+  pure-data suites) — see "cljrs-wasm browser integration" below for what
+  they are and minimal repros: a solo `#?(:default ...)` also matching under
+  `:rust`, `reify` not resolving a qualified protocol symbol, `set!` not
+  resolving an aliased Var, `defonce` rejecting metadata, and a name-based
+  dispatch collision on `cljrs.dom/create-ns`.
 - **`src/replicant/core.cljc`** — `:rust` branches for the host string interop in
   the hot parse path (`.indexOf`/`.substring`/`.split`/`.trim` →
   `clojure.string`/`subs`/`clojure.core`), the event target (`(:target e)` —
@@ -752,3 +765,158 @@ auto-gensym lands.
 the `:rust` target — it shakes out the verification items above without a
 browser. The exact `--src-path` form / namespace-selection flags may need to be
 reconciled with the installed cljrs version's CLI.
+
+## cljrs-wasm browser integration: real DOM editing (post-0.1.219)
+
+The pure-data results above (256/256 assertions, cljrs 0.1.219) are accurate
+and were re-confirmed independently while doing this work (`cargo install
+cljrs --version =0.1.219` really does work; `cljrs test --src-path src
+--src-path test replicant.{hiccup,transition,alias,string,core}-test` really
+does pass clean). What was **not** accurate was this repo's plan for getting
+from there to a browser: `cljrs-dom-requirements.md` and the earlier version
+of the "What this branch implements" section above described a `cljrs wasm
+--config cljrs.edn` CLI command and a `cljrs.edn` `:deps` entry shaped like
+`{cljrs/cljrs-dom {:mvn/version "0.1.195"}}`. Neither exists. Concretely,
+checked against the real, installed 0.1.219 CLI:
+
+- There is no `wasm` subcommand (`cljrs --help` lists `run`, `repl`,
+  `compile`, `eval`, `ir-viz`, `test`, `deps`, `build-native`, `lsp`, `nrepl`
+  — no `wasm`).
+- `cljrs compile --target wasm` is real, but it's a separate, much less
+  mature AOT backend (its own module doc calls it a "scaffold"). Compiling
+  even a trivial function and inspecting the module (`WebAssembly.Module
+  .imports`) shows it imports ~9 fixed `rt_*` runtime primitives from a
+  module named `"rt"` and nothing else — there's no mechanism for a Clojure
+  form to call an arbitrary host/browser function, so it cannot reach the
+  DOM at all, `cljrs.dom` or otherwise.
+- `cljrs.edn`'s `:deps` only supports two shapes, `Dependency::Git` and
+  `Dependency::Local` (found in the `cljrs-deps` crate source) — never a
+  Maven-style coordinate. `{:mvn/version ...}` would never have parsed.
+- `cljrs.dom` **is** real, however: it's published as its own crate,
+  `cljrs-dom` (crates.io, same 0.1.x release train, `web-sys`/`wasm-bindgen`
+  based), and its documented API matches almost exactly what
+  `cljrs-dom-requirements.md` specifies. It isn't consumed via the AOT
+  compiler at all, though — it's a dependency of **`cljrs-wasm`**, a second,
+  separate crate that compiles a tree-walking **REPL interpreter** to
+  `wasm32-unknown-unknown` via `wasm-bindgen`/`wasm-pack` and registers
+  `cljrs.dom` into its globals before any eval. That REPL, driven from JS,
+  is the real path to the browser — not `cljrs compile`.
+
+### The real architecture
+
+`examples/cljrs-wasm/build/build.mjs` builds `cljrs-wasm` (pulling in
+`cljrs-dom`) via `wasm-pack build --target web`, producing a wasm-bindgen JS
++ `.wasm` pair exposing a `Repl` class (`new Repl()`, `await repl.eval(src)
+-> {output, result, is_error}`). The harness page (`examples/cljrs-wasm/
+harness/index.html`) boots one `Repl`, fetches Replicant's own `.cljc`
+source (concatenated in dependency order into one file at build time) as
+plain text, and `eval`s it — then does the same for a small test-harness
+source file — all in the same interpreter session, so it's genuinely
+Replicant's real `:rust` renderer running against real `cljrs.dom` calls,
+editing the real DOM of the page. Verified end-to-end with Playwright
+(headless Chromium) against the built harness: element/text creation,
+attribute set/update/remove, class toggling, style set/remove, keyed-child
+reordering (`insert-before!`/`child-at`), form properties (checkbox
+`checked`, input `value`), `:innerHTML`, SVG namespace creation, on-unmount
+lifecycle hooks, and real click events dispatching through to a re-render —
+all correct, all editing real DOM nodes.
+
+### Why `require` doesn't work in the browser, and what replaces it
+
+`cljrs-wasm`'s embedded interpreter has no filesystem (by design — see its
+own README: "no filesystem I/O"). `require`/the `ns` macro's `:require`
+clause is not a swappable Var; it's a hard-wired lookup (embedded stdlib
+source, or a file on `--src-path`, neither of which exists for
+`replicant.core` or `cljrs.dom` in a browser tab) that fails with `Could not
+find namespace ... on source path` — even when the target namespace already
+has real vars defined from an earlier `eval` call in the same session.
+`alias`, unlike `require`, only needs the namespace to already exist; it
+doesn't try to load anything. Since this harness evaluates every Replicant
+namespace's forms once, in dependency order, in one session, the target
+always already exists by the time a later namespace wants it — so
+`build/transform.mjs` rewrites each file's cross-file `:require` entries
+(other `replicant.*` namespaces, and `cljrs.dom`) into post-`ns` `alias`
+calls at *browser-bundle build time only*. The actual `.cljc` sources are
+untouched except for the two spots noted below that turned out to be
+genuine, target-independent bugs.
+
+### Bugs found once dom.cljc was actually exercised (new, since none of this
+### was reachable from the pure-data test suites)
+
+1. **A solo `#?(:default ...)` matches under `:rust` too.** Standard reader
+   conditional semantics: `:default` matches whenever the active feature
+   isn't listed as its own branch in the *same* `#?()` form. `dom.cljc` had
+   `#?(:default [replicant.env :as env])` and `#?(:default (def memories
+   (js/WeakMap.)))` as single-branch forms, intending "everyone except
+   :rust" but not saying so — so both silently also selected under `:rust`
+   and failed (`replicant.env` doesn't ship a `.cljc`; `js/WeakMap` doesn't
+   exist under cljrs). Fixed with an explicit `:rust` branch (a splicing
+   `#?@(:rust [] :default [[replicant.env :as env]])` for the require entry,
+   a plain `#?(:rust nil :default ...)` for the def). Verified directly:
+   `#?(:default (require '[totally.nonexistent.ns :as x]))` fails to find
+   that namespace when evaluated with `:rust` active, confirming `:default`
+   really does match.
+2. **`reify` doesn't resolve a namespace-qualified protocol symbol** —
+   neither alias-qualified (`replicant/IRender`, aliased to
+   `replicant.protocols`) nor even a *fully-qualified* one
+   (`replicant.protocols/IRender`) — with `is not a protocol`, only a bare
+   symbol interned in the current namespace. Minimal repro (no Replicant
+   involved): `(ns a) (defprotocol IFoo (foo [this]))` then, from a
+   different namespace, `(reify a/IFoo (foo [_] ...))` or
+   `(reify proto.a/IFoo ...)` both fail; `(def IFoo a/IFoo)` then
+   `(reify IFoo ...)` works. Worked around in `dom.cljc`'s `:rust`
+   `create-renderer` by interning local `IRender`/`IMemory` bindings
+   (`(def IRender replicant.protocols/IRender)`) and using the bare names in
+   the two `reify` forms.
+3. **`set!` on a dynamic var doesn't resolve through an alias**, though a
+   plain read does. `(alias 'a 'dyn.a) (set! a/*x* 2)` → `unbound symbol:
+   a/*x*`; `(set! dyn.a/*x* 2)` (fully qualified) works. `dom.cljc`'s
+   `set-dispatch!` did `(set! r/*dispatch* f)` (`r` aliased to
+   `replicant.core`); fixed by spelling out `replicant.core/*dispatch*`
+   under `:rust`.
+4. **`defonce` rejects a metadata-tagged symbol**: `(defonce ^:no-doc state
+   ...)` → `defonce requires a symbol at position 0`; plain `def` with the
+   same metadata works fine. `dom.cljc`'s one `defonce` (the render `state`
+   map) uses plain `def` under `:rust` — re-eval-safety is moot for a
+   browser session that loads this namespace exactly once anyway.
+5. **`cljrs.dom/create-ns` invokes `clojure.core/create-ns` instead** — a
+   name-based dispatch collision (`clojure.core` already has a 1-arity
+   `create-ns` that makes a *namespace*; `cljrs.dom/create-ns` is 2-arity
+   and makes an *element*). Confirmed the two are genuinely different
+   values (`(= cljrs.dom/create-ns clojure.core/create-ns)` → `false`,
+   `(ns-resolve 'cljrs.dom 'create-ns)` → the right var) — but calling it,
+   however it's reached (direct, aliased, `def`-captured, passed as a
+   value), silently ran `clojure.core`'s version and returned a namespace
+   object. `(apply cljrs.dom/create-ns [ns tag])` reaches the right
+   implementation. `dom.cljc`'s `:rust` `create-element` uses `apply` for
+   this one call.
+6. **Attribute/style setters need real strings.** Unlike the browser's
+   auto-coercing `.setAttribute`, cljrs.dom's setters sit on Rust's `&str`
+   boundary and reject non-string values outright (`wrong type: expected
+   string, got long`) — hit immediately by numeric hiccup values like SVG's
+   `:width`/`:cx`/`:r`. Fixed by wrapping values in `str` in `set-attribute`
+   and `set-style` under `:rust`.
+7. **Not fully root-caused, flagged rather than guessed further:** a test
+   that renders a button with a data-driven `:on {:click [...]}` handler,
+   then reaches the handler back out via `cljrs.dom/get-prop el
+   "replicantHandlers"` (the same bookkeeping `dom.cljc` itself uses to
+   rebind handlers across renders) and calls it directly, is reliable in
+   isolation but not as roughly the 11th-or-so render of one interpreter
+   session — `dom/child-at` starts returning `nil` for a node that
+   definitely has children. Smells like the same family as the historical
+   IR-tier promotion bugs (STATUS.md's 0.1.207–0.1.215 saga above), which
+   were keyed off cumulative call counts to a hot function, but this is a
+   *new* manifestation in the wasm-hosted interpreter specifically, not
+   something the native pure-data suites would ever exercise. Not included
+   in `examples/cljrs-wasm/harness`'s automated checks for this reason; real
+   click dispatch is instead verified there by clicking an actual button
+   and reading the result back from plain JS (reliable across many runs).
+   Worth a proper upstream repro from whoever picks this up next.
+
+### Where this lives
+
+`examples/cljrs-wasm/` — see its own README for the build/deploy layout.
+`.github/workflows/cljrs-wasm-preview.yml` builds the harness and deploys it
+to a subpath of a user-provided SFTP host on every PR (one subpath per PR,
+plus an index of all currently-open ones), so DOM editing changes can be
+eyeballed in a real browser and iterated on without a local build.

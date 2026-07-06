@@ -1,0 +1,165 @@
+name: cljrs-wasm preview
+
+# Builds Replicant's cljrs/WASM browser test harness (examples/cljrs-wasm/harness)
+# and deploys it to a subpath on a user-provided SFTP host, one subpath per open
+# pull request, alongside an index of every currently-open preview. See
+# examples/cljrs-wasm/README.md for the harness itself and
+# doc/cljrs-port/STATUS.md for the architecture this deploys.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   PREVIEW_SFTP_HOST          hostname of the SFTP server
+#   PREVIEW_SFTP_USERNAME      SFTP username
+#   PREVIEW_SFTP_SSH_KEY       PEM-encoded private key for that user
+#   PREVIEW_SFTP_REMOTE_PATH   base directory on the server to deploy under,
+#                              e.g. /var/www/example.com/replicant-preview
+#   PREVIEW_SITE_BASE_URL      public URL for that same directory, e.g.
+#                              https://example.com/replicant-preview
+# Optional:
+#   PREVIEW_SFTP_PORT          defaults to 22
+#
+# Until these are configured, the deploy/cleanup jobs below will fail -- the
+# build itself doesn't need them, so this is safe to merge ahead of setting
+# the secrets up.
+#
+# Note: GitHub does not expose secrets to `pull_request` workflow runs
+# triggered from a fork, so previews only deploy for PRs from branches on
+# this repo itself. That's intentional -- switching to `pull_request_target`
+# to reach fork PRs would run the fork's own workflow-adjacent code with
+# access to these deploy credentials, which is the opposite of what you want.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to (re)deploy a preview for"
+        required: true
+
+env:
+  CLJRS_VERSION: "0.1.219"
+
+jobs:
+  build-and-deploy:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo-installed tools
+        id: cache-cargo-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cache/.wasm-pack
+          key: cljrs-wasm-preview-tools-${{ runner.os }}
+
+      - name: Install wasm-pack
+        if: steps.cache-cargo-tools.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack
+
+      - name: Cache cljrs-wasm runtime build
+        uses: actions/cache@v4
+        with:
+          path: .cache/cljrs-wasm-runtime
+          key: cljrs-wasm-runtime-${{ runner.os }}-${{ env.CLJRS_VERSION }}
+
+      - name: Build harness bundle
+        run: |
+          node examples/cljrs-wasm/build/build.mjs \
+            --out dist \
+            --cljrs-version "${{ env.CLJRS_VERSION }}" \
+            --profile release
+
+      - name: Install lftp
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      - name: Deploy preview
+        id: deploy
+        env:
+          PREVIEW_SFTP_HOST: ${{ secrets.PREVIEW_SFTP_HOST }}
+          PREVIEW_SFTP_PORT: ${{ secrets.PREVIEW_SFTP_PORT }}
+          PREVIEW_SFTP_USERNAME: ${{ secrets.PREVIEW_SFTP_USERNAME }}
+          PREVIEW_SFTP_SSH_KEY: ${{ secrets.PREVIEW_SFTP_SSH_KEY }}
+          PREVIEW_SFTP_REMOTE_PATH: ${{ secrets.PREVIEW_SFTP_REMOTE_PATH }}
+          PREVIEW_SITE_BASE_URL: ${{ secrets.PREVIEW_SITE_BASE_URL }}
+          # Routed through env, not interpolated into the script text, since
+          # a PR title is attacker-controlled (opened by anyone) and could
+          # otherwise inject shell commands.
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          node examples/cljrs-wasm/build/deploy.mjs deploy \
+            --pr "$PR_NUMBER" \
+            --title "$PR_TITLE" \
+            --dist-dir dist
+          echo "url=${PREVIEW_SITE_BASE_URL%/}/pr-$PR_NUMBER/" >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview URL on the PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = `${{ steps.deploy.outputs.url }}`;
+            const marker = '<!-- cljrs-wasm-preview -->';
+            const body = `${marker}\nReplicant cljrs/WASM preview: ${url}`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install lftp
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      - name: Remove preview
+        env:
+          PREVIEW_SFTP_HOST: ${{ secrets.PREVIEW_SFTP_HOST }}
+          PREVIEW_SFTP_PORT: ${{ secrets.PREVIEW_SFTP_PORT }}
+          PREVIEW_SFTP_USERNAME: ${{ secrets.PREVIEW_SFTP_USERNAME }}
+          PREVIEW_SFTP_SSH_KEY: ${{ secrets.PREVIEW_SFTP_SSH_KEY }}
+          PREVIEW_SFTP_REMOTE_PATH: ${{ secrets.PREVIEW_SFTP_REMOTE_PATH }}
+          PREVIEW_SITE_BASE_URL: ${{ secrets.PREVIEW_SITE_BASE_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          node examples/cljrs-wasm/build/deploy.mjs cleanup --pr "$PR_NUMBER"

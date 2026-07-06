@@ -1,0 +1,224 @@
+(ns harness.tests
+  (:require [clojure.string :as str]))
+
+;; `replicant.dom` and `cljrs.dom` are already loaded/registered by the time
+;; this file runs (see index.html); alias rather than require -- see
+;; build/transform.mjs's doc comment for why `require` doesn't work here.
+(alias 'r 'replicant.dom)
+(alias 'dom 'cljrs.dom)
+
+(defonce results (atom []))
+
+(defn- record! [name pass? message]
+  (swap! results conj {:name name :pass? pass? :message message}))
+
+(defn check!
+  "Throws with `msg` (plus expected/actual, when given) if `ok?` is falsy."
+  ([ok? msg] (when-not ok? (throw (ex-info msg {}))))
+  ([ok? msg expected actual]
+   (when-not ok?
+     (throw (ex-info (str msg " -- expected " (pr-str expected) ", got " (pr-str actual)) {})))))
+
+(defn- new-sandbox-el
+  "A fresh, visible container for one test case, so a human looking at the
+  deployed page can see exactly what each test actually rendered."
+  [test-name]
+  (let [wrapper (dom/create "div")
+        heading (dom/create "div")
+        el (dom/create "div")]
+    (dom/set-attr! wrapper "class" "test-case")
+    (dom/set-attr! heading "class" "test-case-name")
+    (dom/append! heading (dom/create-text test-name))
+    (dom/set-attr! el "class" "test-case-render")
+    (dom/append! wrapper heading)
+    (dom/append! wrapper el)
+    (dom/append! (dom/by-id "test-sandbox") wrapper)
+    el))
+
+(defn run-test! [name thunk]
+  (let [el (new-sandbox-el name)]
+    (try
+      (thunk el)
+      (record! name true "")
+      (catch :default e
+        (record! name false (str (ex-message e)))))))
+
+;; ---- individual tests -------------------------------------------------
+
+(defn test-mount-renders-text [el]
+  (r/render el [:h1 "Hello from Replicant/cljrs"])
+  (check! (= 1 (dom/child-count el)) "expected one child")
+  (check! (str/includes? (dom/html el) "Hello from Replicant/cljrs")
+          "rendered text missing"))
+
+(defn test-attribute-update [el]
+  (r/render el [:div {:title "a" :data-x "1"}])
+  (check! (str/includes? (dom/html el) "title=\"a\"") "initial attribute missing")
+  (r/render el [:div {:title "b" :data-x "1"}])
+  (check! (str/includes? (dom/html el) "title=\"b\"")
+          "attribute update did not apply (reconcile, not recreate)")
+  (check! (not (str/includes? (dom/html el) "title=\"a\""))
+          "stale attribute value left behind"))
+
+(defn test-attribute-removal [el]
+  (r/render el [:div {:title "present"}])
+  (check! (str/includes? (dom/html el) "title") "attribute should be present")
+  (r/render el [:div {}])
+  (check! (not (str/includes? (dom/html el) "title"))
+          "attribute should have been removed"))
+
+(defn test-class-toggle [el]
+  (r/render el [:div {:class "a b"}])
+  (check! (str/includes? (dom/html el) "class=\"a b\"") "initial classes missing")
+  (r/render el [:div {:class "a"}])
+  (check! (str/includes? (dom/html el) "class=\"a\"") "class removal did not apply")
+  (check! (not (str/includes? (dom/html el) "b"))
+          "removed class still present"))
+
+(defn test-style-set-and-remove [el]
+  (r/render el [:div {:style {:color "red"}}])
+  (check! (str/includes? (dom/html el) "color: red") "style not applied")
+  (r/render el [:div {:style {}}])
+  (check! (not (str/includes? (dom/html el) "color"))
+          "style not removed"))
+
+(defn test-keyed-reorder [el]
+  (r/render el [:ul (for [x [:a :b :c]] [:li {:replicant/key x} (name x)])])
+  (let [before (dom/html el)]
+    (check! (= "<ul><li>a</li><li>b</li><li>c</li></ul>" before) "unexpected initial order" "<ul><li>a</li><li>b</li><li>c</li></ul>" before))
+  (r/render el [:ul (for [x [:c :b :a]] [:li {:replicant/key x} (name x)])])
+  (let [after (dom/html el)]
+    (check! (= "<ul><li>c</li><li>b</li><li>a</li></ul>" after) "reorder did not apply" "<ul><li>c</li><li>b</li><li>a</li></ul>" after)))
+
+(defn test-inner-html [el]
+  (r/render el [:div {:innerHTML "<b>bold</b>"}])
+  (check! (= "<div><b>bold</b></div>" (dom/html el)) ":innerHTML passthrough failed"))
+
+(defn test-checkbox-checked-property [el]
+  (r/render el [:input {:type "checkbox" :checked true}])
+  (let [input (dom/child-at el 0)]
+    (check! (true? (dom/get-prop input "checked")) "checkbox should be checked" true (dom/get-prop input "checked"))
+    (r/render el [:input {:type "checkbox" :checked false}])
+    (check! (false? (dom/get-prop input "checked")) "checkbox should be unchecked")))
+
+(defn test-input-value-property [el]
+  (r/render el [:input {:type "text" :value "hello"}])
+  (let [input (dom/child-at el 0)]
+    (check! (= "hello" (dom/value input)) "input value not set" "hello" (dom/value input))
+    (r/render el [:input {:type "text" :value "world"}])
+    (check! (= "world" (dom/value input)) "input value not updated" "world" (dom/value input))))
+
+(defn test-svg-element-creation [el]
+  (r/render el [:svg {:viewBox "0 0 100 100" :width 100 :height 100}
+                [:circle {:cx 50 :cy 50 :r 10 :fill "tomato"}]])
+  (check! (str/includes? (dom/html el) "<circle")
+          "SVG child not rendered")
+  ;; Actual SVG-*namespace* correctness (not just tag nesting) is checked by
+  ;; the small supplementary JS check in index.html, since cljrs.dom doesn't
+  ;; expose a namespaceURI getter.
+  )
+
+;; NOT run as part of the automated suite -- see the comment above
+;; `run-all-tests!` for why. Kept here (and callable from a devtools console
+;; against a live page: `harness.tests.test-click-handler-is-registered`) as
+;; a starting point for whoever chases the underlying cljrs behavior down.
+;;
+;; Dispatching a *real* click and checking that it took effect *is* covered,
+;; reliably, in index.html's supplementary checks, by clicking an actual
+;; button in the live demo below and reading the result back from plain JS.
+(defn test-click-handler-is-registered [el]
+  (r/render el [:button {:id "click-target" :on {:click [:test-marker 42]}} "Click"])
+  (let [button (dom/child-at el 0)
+        handlers (dom/get-prop button "replicantHandlers")]
+    (check! (some? (get handlers "click")) "no click handler was registered")))
+
+(defn test-lifecycle-unmount-hook [el]
+  (let [unmounted (atom false)]
+    (r/render el [:div [:p {:replicant/on-unmount (fn [_] (reset! unmounted true))} "bye"]])
+    (r/render el [:div])
+    (check! (true? @unmounted) "on-unmount hook did not fire")))
+
+;; `test-click-handler-is-registered` is deliberately not run here: reaching
+;; the registered handler via `get-prop "replicantHandlers"` (dom.cljc's own
+;; rebind bookkeeping) turned out to be reliable in isolation but not
+;; consistently as the ~11th-or-so render in one session -- see
+;; doc/cljrs-port/STATUS.md's cljrs-wasm section for the isolated repros this
+;; investigation got to. Real click dispatch is covered, reliably, by
+;; index.html's supplementary checks instead.
+(defn run-all-tests! []
+  (reset! results [])
+  (run-test! "mounts and renders text" test-mount-renders-text)
+  (run-test! "updates an attribute in place" test-attribute-update)
+  (run-test! "removes an attribute" test-attribute-removal)
+  (run-test! "toggles a class" test-class-toggle)
+  (run-test! "sets and removes a style property" test-style-set-and-remove)
+  (run-test! "reorders keyed children" test-keyed-reorder)
+  (run-test! ":innerHTML passthrough" test-inner-html)
+  (run-test! "checkbox :checked is a live property" test-checkbox-checked-property)
+  (run-test! "text input :value is a live property" test-input-value-property)
+  (run-test! "creates an SVG subtree" test-svg-element-creation)
+  (run-test! "on-unmount hook fires when a node is removed" test-lifecycle-unmount-hook)
+  @results)
+
+;; ---- summary UI (rendered with Replicant itself) -----------------------
+;;
+;; This is deliberately plain, high-contrast text -- no color-only signal --
+;; so the whole panel can be selected and pasted as-is into a bug report or
+;; back to an agent for debugging.
+
+(defn- summary-hiccup [results]
+  (let [total (count results)
+        passed (count (filter :pass? results))
+        all-pass? (= total passed)]
+    [:div
+     [:h2 {:class (if all-pass? "summary-pass" "summary-fail")}
+      (str passed "/" total " tests passed")]
+     [:ul {:class "summary-list"}
+      (for [{:keys [name pass? message]} results]
+        [:li {:replicant/key name
+              :class (if pass? "pass" "fail")}
+         (str (if pass? "PASS  " "FAIL  ") name
+              (when-not pass? (str " -- " message)))])]]))
+
+(defn render-summary! []
+  (r/render (dom/by-id "summary") (summary-hiccup @results)))
+
+;; ---- live interactive demo ----------------------------------------------
+;;
+;; A small persistent app for manually clicking through the same DOM-editing
+;; paths the automated checks cover above (reconcile, keyed reorder, forms,
+;; SVG) -- for visually confirming behavior, and as a target for real click
+;; events (the automated checks above call registered handlers directly
+;; instead of dispatching a real event; this demo exercises the real path).
+
+(defonce demo-store (atom {:count 0 :items [:a :b :c] :done? false}))
+
+(defn- demo-ui [{:keys [count items done?]}]
+  [:div
+   [:p "Count: " count]
+   [:button {:id "demo-inc" :on {:click [:demo/inc]}} "Increment"]
+   [:button {:id "demo-reverse" :on {:click [:demo/reverse]}} "Reverse list"]
+   [:label [:input {:id "demo-toggle" :type "checkbox" :checked done?
+                     :on {:change [:demo/toggle]}}]
+    " done"]
+   [:svg {:viewBox "0 0 100 100" :width "80" :height "80"}
+    [:circle {:cx 50 :cy 50 :r (+ 10 count) :fill "tomato"}]]
+   [:ul {:id "demo-list"}
+    (for [x items] [:li {:replicant/key x} (name x)])]])
+
+(defn- demo-dispatch [_event-data [action]]
+  (case action
+    :demo/inc (swap! demo-store update :count inc)
+    :demo/reverse (swap! demo-store update :items (comp vec reverse))
+    :demo/toggle (swap! demo-store update :done? not)
+    nil)
+  (r/render (dom/by-id "demo") (demo-ui @demo-store)))
+
+(defn init-demo! []
+  (r/set-dispatch! demo-dispatch)
+  (r/render (dom/by-id "demo") (demo-ui @demo-store)))
+
+(defn init! []
+  (run-all-tests!)
+  (render-summary!)
+  (init-demo!))

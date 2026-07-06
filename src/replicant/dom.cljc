@@ -8,10 +8,37 @@
             ;; replicant.env only ships as .clj/.cljs (it is the cljs-compiler
             ;; bridge for dev keys), so cljrs cannot load it. The :rust backend
             ;; skips dev-key injection, so it does not need the namespace.
-            #?(:default [replicant.env :as env])
-            #?(:rust [cljrs.dom :as dom])))
+            ;;
+            ;; A plain `#?(:default ...)` matches whenever no other branch in
+            ;; the *same* form lists the active feature -- since :rust isn't
+            ;; listed here, :default would otherwise also match under :rust
+            ;; and try (and fail) to require replicant.env. Splice in nothing
+            ;; for :rust and the real require for everyone else.
+            #?@(:rust []
+                :default [[replicant.env :as env]])))
 
-#?(:default
+;; cljrs-wasm's Repl registers cljrs.dom natively (`cljrs_dom::register`)
+;; before any eval, but never marks the namespace loaded, so a normal
+;; `:require` clause in the ns form above sends it through cljrs-env's
+;; source-file loader, which fails with "Could not find namespace cljrs.dom
+;; on source path" (there is no .cljrs/.cljc file for a native-only
+;; namespace). `alias` only looks up the already-registered namespace object,
+;; so it works without going through that loader.
+#?(:rust (alias 'dom 'cljrs.dom))
+
+;; cljrs's `reify` fails to resolve a namespace-qualified protocol symbol --
+;; even a fully-qualified one, not just an alias -- with "is not a protocol",
+;; even though the same symbol resolves fine everywhere else. It only accepts
+;; a bare symbol naming a protocol interned in the *current* namespace, so the
+;; create-renderer reify below (in its own #?(:rust ...) branch) uses these
+;; local bindings instead of `replicant/IRender` / `replicant/IMemory`.
+#?(:rust (def IRender replicant.protocols/IRender))
+#?(:rust (def IMemory replicant.protocols/IMemory))
+
+;; A solo `#?(:default ...)` also matches under :rust (no other branch in this
+;; form lists it), so it must be spelled out explicitly to stay JS/CLJS-only.
+#?(:rust nil
+   :default
    (defn ^:no-doc remove-listener [^js/EventTarget el event opt]
      (when-let [old-handler (some-> el .-replicantHandlers (aget event))]
        (.removeEventListener el event old-handler (clj->js opt)))))
@@ -71,7 +98,7 @@
            ;; important part is that the element doesn't get stuck forever.
            (vreset! timer (js/setTimeout callback (+ dur 200))))))))
 
-#?(:default (def ^:no-doc memories (js/WeakMap.)))
+#?(:rust nil :default (def ^:no-doc memories (js/WeakMap.)))
 
 (defn ^:export recall [node]
   #?(:rust (dom/recall node)
@@ -80,7 +107,7 @@
 #?(:rust
    (defn ^:no-doc create-renderer []
      (reify
-       replicant/IRender
+       IRender
        (attached? [_this el]
          (dom/connected? el))
 
@@ -89,11 +116,18 @@
 
        (create-element [_this tag-name options]
          (if-let [ns (:ns options)]
-           (dom/create-ns ns tag-name)
+           ;; cljrs has a name-based dispatch collision between
+           ;; `cljrs.dom/create-ns` (2-arity, makes a DOM element) and
+           ;; `clojure.core/create-ns` (1-arity, makes a Clojure namespace):
+           ;; calling `dom/create-ns` directly invokes the wrong one and
+           ;; silently returns a namespace object instead of an element,
+           ;; regardless of the alias/qualification used at the call site.
+           ;; `apply` goes through a different, unaffected dispatch path.
+           (apply dom/create-ns [ns tag-name])
            (dom/create tag-name)))
 
        (set-style [this el style v]
-         (dom/set-style! el (name style) v)
+         (dom/set-style! el (name style) (str v))
          this)
 
        (remove-style [this el style]
@@ -109,16 +143,21 @@
          this)
 
        (set-attribute [this el attr v opt]
+         ;; cljrs.dom's attribute/value setters are strict about Rust's `&str`
+         ;; boundary (unlike the browser's auto-coercing `.setAttribute`), so
+         ;; numeric/keyword hiccup values (e.g. SVG `:width`/`:cx`) must be
+         ;; stringified explicitly for anything that isn't already a DOM
+         ;; property with its own typed setter (checked/selected are boolean).
          (cond
            (= "innerHTML" attr) (dom/set-html! el v)
-           (= "value" attr) (dom/set-value! el v)
-           (= "default-value" attr) (dom/set-attr! el "value" v)
+           (= "value" attr) (dom/set-value! el (str v))
+           (= "default-value" attr) (dom/set-attr! el "value" (str v))
            (= "selected" attr) (dom/set-selected! el v)
-           (= "default-selected" attr) (dom/set-attr! el "selected" v)
+           (= "default-selected" attr) (dom/set-attr! el "selected" (str v))
            (= "checked" attr) (dom/set-checked! el v)
-           (= "default-checked" attr) (dom/set-attr! el "checked" v)
-           (:ns opt) (dom/set-attr-ns! el (:ns opt) attr v)
-           :else (dom/set-attr! el attr v))
+           (= "default-checked" attr) (dom/set-attr! el "checked" (str v))
+           (:ns opt) (dom/set-attr-ns! el (:ns opt) attr (str v))
+           :else (dom/set-attr! el attr (str v)))
          this)
 
        (remove-attribute [this el attr]
@@ -186,7 +225,7 @@
        (next-frame [_this f]
          (on-next-frame f))
 
-       replicant/IMemory
+       IMemory
        (remember [_this node memory]
          (dom/remember! node memory))
 
@@ -334,7 +373,11 @@
        (recall [_this ^js node]
          (.get ^js memories node)))))
 
-(defonce ^:no-doc state (volatile! {}))
+;; cljrs's `defonce` doesn't accept a metadata-tagged symbol ("defonce requires
+;; a symbol at position 0"); `def` works fine there, and re-eval-safety is moot
+;; for a browser session that loads this namespace exactly once anyway.
+#?(:rust (def ^:no-doc state (volatile! {}))
+   :default (defonce ^:no-doc state (volatile! {})))
 
 (defn ^:no-doc -clear-element [el]
   #?(:rust (dom/set-html! el "")
@@ -411,4 +454,8 @@
   that are not functions. See data-driven event handlers and life-cycle hooks in
   the user guide for details."
   [f]
-  (set! r/*dispatch* f))
+  ;; cljrs's `set!` doesn't resolve an alias-qualified symbol ("unbound symbol:
+  ;; r/*dispatch*"), only a bare or fully-qualified one -- unlike plain reads,
+  ;; which work fine through an alias. Spell it out under :rust.
+  #?(:rust (set! replicant.core/*dispatch* f)
+     :default (set! r/*dispatch* f)))

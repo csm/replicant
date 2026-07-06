@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light dark;
+  --pass: #1a7f37;
+  --fail: #c0341d;
+  --border: #8884;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 4rem;
+  line-height: 1.4;
+}
+
+header {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+}
+
+section {
+  margin-bottom: 2.5rem;
+}
+
+code {
+  font-size: 0.9em;
+}
+
+#status {
+  font-family: ui-monospace, monospace;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  display: inline-block;
+}
+#status.ready { border-color: var(--pass); }
+#status.error { border-color: var(--fail); color: var(--fail); }
+
+#summary {
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+}
+
+.summary-pass { color: var(--pass); }
+.summary-fail { color: var(--fail); }
+
+.summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.summary-list li.pass { color: var(--pass); }
+.summary-list li.fail { color: var(--fail); font-weight: bold; }
+
+#demo {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+#demo button {
+  margin: 0 0.5rem 0.5rem 0;
+}
+
+#test-sandbox .test-case {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.test-case-name {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  opacity: 0.7;
+  margin-bottom: 0.25rem;
+}

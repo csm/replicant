@@ -9,13 +9,18 @@ handful of DOM operations beyond `cljrs.dom`'s original surface. This document
 flagged them for upstream implementation rather than working around them inside
 Replicant.
 
-**Status: unblocked as of cljrs 0.1.195.** Every operation listed below now
-exists in `cljrs.dom`, and the library→WASM packaging workflow landed in
-0.1.194. This doc now serves as the mapping from each Replicant protocol method
-to the `cljrs.dom` function that implements it for the forthcoming `:rust`
-backend.
+**Status: confirmed working, as actually verified against cljrs 0.1.219**
+(installed via `cargo install cljrs`, and `cljrs-dom`/`cljrs-wasm` built via
+`wasm-pack` -- see `examples/cljrs-wasm/` and
+`doc/cljrs-port/STATUS.md`'s "cljrs-wasm browser integration" section). Every
+operation listed below exists in `cljrs.dom` and is exercised by Replicant's
+real `:rust` renderer in a real browser (Playwright/headless Chromium) via
+that example. The version numbers in the table below are carried over from
+an earlier draft of this document and were not independently re-verified per
+row; treat them as approximate. The "library → WASM packaging" row was wrong
+and is corrected further down (see "Toolchain").
 
-### Resolution summary (cljrs 0.1.195)
+### Resolution summary
 
 | Requirement | `cljrs.dom` fn | Landed |
 |---|---|---|
@@ -30,7 +35,7 @@ backend.
 | frame scheduling | `request-animation-frame` | 0.1.195 |
 | computed style | `computed-style` | 0.1.195 |
 | node memory | `remember!`, `recall` | 0.1.195 |
-| library → WASM packaging | `cljrs` wasm CLI | 0.1.194 |
+| library → WASM packaging | *(see "Toolchain" below -- this row was wrong)* | -- |
 
 ## Background
 
@@ -256,18 +261,29 @@ shipped.
     references → potential retention), so (a) is preferred. Please confirm which
     guarantee cljrs provides.
 
-## Toolchain: library → WASM packaging (landed in cljrs 0.1.194)
+## Toolchain: how Replicant actually gets into the browser
 
-Earlier `cljrs` releases had no documented path to package a cljrs *library*
-(Replicant's `.cljc`) plus an application entry point into a loadable
-wasm-bindgen module — `cljrs compile app.cljrs -o app` produced a native binary
-and `cljrs-wasm` only compiled the *REPL* to `wasm32-unknown-unknown`.
+**Correction (see `doc/cljrs-port/STATUS.md`'s "cljrs-wasm browser
+integration" section for the full account): there is no `cljrs wasm` CLI
+subcommand, in 0.1.219 or any other released version checked.** An earlier
+draft of this document claimed one landed in 0.1.194 packaging a cljrs
+*library* plus an app entry point into a wasm-bindgen module; that turned out
+not to exist -- `cljrs compile --target wasm` is real, but it's a separate,
+much less mature AOT backend with no host-call/FFI mechanism of any kind
+(confirmed: the emitted module's only imports are ~9-165 fixed internal `rt_*`
+runtime primitives, nothing for calling into arbitrary host/browser APIs).
 
-**Resolved upstream:** wasm CLI support and packaging land in **cljrs 0.1.194**
-(published 2026-06-30). The Replicant port targets this version for its build
-step — a multi-file cljrs project compiled to a wasm-bindgen module with
-`cljrs.dom` available and an exported entry function the host page calls. The
-remaining blockers are the `cljrs.dom` API additions listed above.
+What was correct in the original (pre-correction) version of this paragraph:
+`cljrs-wasm` compiles a tree-walking-interpreter **REPL** to
+`wasm32-unknown-unknown` via `wasm-bindgen`/`wasm-pack`, and that -- not the
+AOT compiler -- is the real path. `cljrs.dom` is a real, separate crate
+(`cljrs-dom`, published alongside the rest of the 0.1.x release train) that
+`cljrs-wasm` depends on and registers into the interpreter's globals before
+any eval. The harness in `examples/cljrs-wasm/` drives this REPL directly:
+it `eval`s Replicant's own `.cljc` source (concatenated, with cross-file
+`:require`s rewritten to `alias` calls -- there's no filesystem in the
+browser for `require` to resolve sibling files against) and then the
+application/test code, all in the same interpreter session.
 
 ## Notes for the eventual Replicant `:rust` backend
 
