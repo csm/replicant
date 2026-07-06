@@ -1,0 +1,28 @@
+(ns cljrs-probe.ir-lowering-minimal
+  (:require [replicant.core :as core]))
+;; Reproduction of the Tier-1 IR-lowering bug against REAL Replicant code (see
+;; STATUS.md "bug 5"). For the fully self-contained, zero-Replicant-dependency
+;; version of this same bug (a two-file repro: a macro in one namespace, used
+;; via alias from another, wrapped in a function, called ~50+ times), see
+;; ../ir-lowering-standalone-repro/ -- that is the canonical repro to hand to
+;; the cljrs maintainer; this file exists to confirm the bug still manifests
+;; against the actual library code, not just the synthetic isolation.
+;;
+;; A single function, `replicant.core/get-attrs`, called repeatedly on the same
+;; (or freshly-built, doesn't matter) argument. The first ~49 calls succeed
+;; silently; from the 50th call onward, EVERY subsequent call in the process
+;; throws "Not a function: <fn> is not callable" -- permanently, for the rest
+;; of the process (not just this call site: any other call site invoking
+;; get-attrs anywhere in the program will also fail from that point on).
+;; Argument identity (same object vs. a fresh literal each call) does not
+;; matter; the threshold is purely a cumulative per-function call count.
+;;
+;; Run: cljrs run --src-path src examples/cljrs-wasm/probes/37_ir_lowering_minimal.cljrs
+;; Expected (correct): "55 calls succeeded, no error"
+;; Actual (cljrs <= 0.1.210, default settings): throws around call 50.
+;; Workaround: --ir-threshold set very high (e.g. 100000000) avoids the
+;; promotion entirely and the loop completes without error.
+(def headers [:h1 nil nil nil {:title "t"} [] nil nil nil])
+(dotimes [i 55]
+  (core/get-attrs headers))
+(println "55 calls succeeded, no error")

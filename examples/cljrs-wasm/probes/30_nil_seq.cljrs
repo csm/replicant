@@ -1,0 +1,13 @@
+(ns cljrs-probe.nil-seq)
+;; Hypothesis for "wrong type: expected collection, got nil": cljrs seq fns
+;; throw on nil instead of nil-punning (Clojure treats nil as empty). Replicant's
+;; attribute path runs seq ops over absent classes/styles/children (= nil).
+(println "30a seq:"        (seq nil))
+(println "30b map:"        (doall (map inc nil)))
+(println "30c keep:"       (doall (keep identity nil)))
+(println "30d reduce:"     (reduce + 0 nil))
+(println "30e into:"       (into [] nil))
+(println "30f count:"      (count nil))
+(println "30g reduce-kv:"  (reduce-kv (fn [a _ _] a) :x nil))
+(println "30h first/next:" (first nil) (next nil))
+(println "30 nil-seq: ok")

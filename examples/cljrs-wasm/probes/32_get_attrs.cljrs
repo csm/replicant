@@ -1,0 +1,5 @@
+(ns cljrs-probe.get-attrs
+  (:require [replicant.core :as core]))
+;; Parse+prep an attributed node (prep-attrs: concat/get-classes/dissoc/explode).
+(println "32 get-attrs:"
+         (core/get-attrs (core/get-hiccup-headers nil [:h1 {:title "t"} "hi"])))

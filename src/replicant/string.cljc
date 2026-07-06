@@ -26,7 +26,16 @@
            (.push sb s))
 
          (to-string [_]
-           (.join sb ""))))))
+           (.join sb ""))))
+
+     :rust
+     (let [sb (volatile! [])]
+       (reify IStringifier
+         (append [_ s]
+           (vswap! sb conj s))
+
+         (to-string [_]
+           (apply str @sb))))))
 
 (def ^:no-doc self-closing?
   #{"area" "audio" "base" "br" "col" "embed" "hr" "img"

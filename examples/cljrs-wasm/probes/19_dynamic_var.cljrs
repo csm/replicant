@@ -1,0 +1,6 @@
+(ns cljrs-probe.dynvar
+  (:require [replicant.core :as core]))
+;; Lifecycle tests do (binding [replicant.core/*dispatch* f] ...). Reproduce
+;; binding + qualified access of a dynamic var declared in another namespace.
+(println "19 dynamic-var:"
+         (binding [core/*dispatch* (fn [& _] :ok)] (fn? core/*dispatch*)))

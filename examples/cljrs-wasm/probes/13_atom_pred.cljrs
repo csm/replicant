@@ -1,0 +1,3 @@
+(ns cljrs-probe.atom-pred)
+;; Alternative detection: does cljrs core provide atom? ?
+(println "13 atom?:" (atom? (atom 1)))

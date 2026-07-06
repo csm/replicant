@@ -1,0 +1,208 @@
+name: cljrs
+
+# Exercises Replicant's pure-data tests under the clojurust (cljrs) interpreter.
+# These tests drive the renderer through the in-memory `replicant.mutation-log`
+# fake (no DOM, no wasm), so they validate the `:rust` reader-conditional target
+# -- reader conditionals, macro expansion, persistent collections and stdlib
+# coverage -- independent of `cljrs.dom`. See doc/cljrs-port/STATUS.md.
+
+on:
+  # PRs cover the feature branches; pushing to a branch *and* opening a PR would
+  # otherwise run this twice with separate (non-shared) cljrs binary caches.
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "test/**"
+      - "examples/cljrs-wasm/**"
+      - ".github/workflows/cljrs.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "examples/cljrs-wasm/**"
+      - ".github/workflows/cljrs.yml"
+  workflow_dispatch:
+
+env:
+  # cljrs >= 0.1.195 ships the cljrs.dom additions and the wasm CLI; 0.1.196 adds
+  # reader metadata on ns/def names; 0.1.197 adds auto-gensym (symbol#); 0.1.198
+  # adds defmacro-name metadata + the map-literal reader fix; 0.1.199 adds the
+  # `declare` macro. 0.1.200 adds map-entry?; 0.1.201 adds dynamic-var binding;
+  # 0.1.203 adds extend-via-metadata protocol dispatch + some->> + run!.
+  # 0.1.204 fixes cross namespace extend-via-metadata
+  # 0.1.207 fixes map entry types, metadata for empty, and deref sugar in anonymous functions
+  # 0.1.210 intends to fix IR mis-lowering, into with metadata, and keys
+  # destructuring for namespaced keys. Verified locally: `into`-with-metadata and
+  # namespaced :keys destructuring ARE fixed (probes 36b/36c pass; the
+  # --ir-threshold-high suites go from 206/235 passing (18 errors) at 0.1.207 to
+  # 221/235 (1 error) here). BUT the IR mis-lowering itself is NOT fixed at
+  # default settings -- probe 36a still fails from iteration ~10 onward, and the
+  # default-settings suites are still ~211 errors, same as before 0.1.210. The
+  # diagnostic --ir-threshold step below remains necessary.
+  # 0.1.211 fixes cross namespace macro generated functions in IR lowerer.
+  # Verified locally: the "not callable" corruption is genuinely fixed (5+
+  # repeated runs of examples/cljrs-wasm/probes/ir-lowering-standalone-repro/
+  # and probe 37 all pass). BUT default-settings suites are still ~211 errors,
+  # because the same underlying IR-tier promotion defect now surfaces as NEW
+  # symptoms instead: silent string corruption (`(str x nil)` returns "xnil"
+  # once its wrapping fn is called ~50+ times -- probe 38, zero dependencies,
+  # not even a macro) and non-deterministic process crashes (graceful panic or
+  # SIGSEGV) under the full core-test suite. Both are eliminated by
+  # --ir-threshold, same as before. See STATUS.md "0.1.211" for the full
+  # writeup. The diagnostic --ir-threshold step below remains necessary.
+  # 0.1.212 fixes nil handling for str under IR lowering. Verified locally:
+  # probe 38 (str-nil corruption) now passes cleanly across 3 repeated runs, no
+  # regression on bug 5's repros. BUT the crash (bug 8) persists -- 4 of 5 runs
+  # of `cljrs test ... replicant.core-test` still crash (SIGSEGV or a graceful
+  # panic, varying by run), still eliminated by --ir-threshold. Found the exact
+  # panic via RUST_BACKTRACE=full: `rpds-1.2.1/src/vector/mod.rs:134: index out
+  # of bounds: the len is 2 but the index is 8` -- index 8 is the `text` slot
+  # in Replicant's 9-element hiccup-headers tuple, so a vector that should have
+  # 9 elements intermittently gets built with only 2 once promoted. Confirmed
+  # same defect family (not a new 5th bug): with --ir-threshold disabled, the
+  # exact test that produces this crash only shows the already-known benign
+  # assertion failure. See STATUS.md "0.1.212" for the full writeup, including
+  # an unsuccessful minimization attempt (a bare conj-chain builder does not
+  # reproduce it -- the trigger needs more of the real reconcile machinery).
+  # 0.1.213 fixes a use-after-free bug when conj!/assoc! is IR lowered/region
+  # optimized -- confirmed: the bug 8 crash (rpds vector index-out-of-bounds
+  # panic) is gone, 5/5 clean runs. BUT a 4th symptom of the same defect
+  # family remains: core-test at default settings still shows ~55-70
+  # failures vs. the --ir-threshold-disabled baseline of 13 (always 1 error,
+  # never a crash, on either side). Every extra failure is an existing,
+  # already-rendered node's text/children silently reading back as "" on a
+  # later mutation-log event, even though that node's content didn't change
+  # in the render that produced the event -- e.g. re-rendering
+  # [:h1 {:lang "en"} "Hello world"] with only the attribute changed logs
+  # [:set-attribute [:h1 ""] ...] instead of [:set-attribute [:h1 "Hello
+  # world"] ...]. Minimized to a single repeated scenario (no cross-namespace
+  # macro needed this time), deterministic at exactly call 150 across 2 runs:
+  # examples/cljrs-wasm/probes/39_stale_children_after_promotion.cljrs. Looks
+  # like 0.1.213 fixed the memory-safety half of bug 8 (no more out-of-bounds
+  # panics) but not the data-integrity half (the collection can still
+  # silently end up empty under promotion). See STATUS.md "0.1.213" for the
+  # full writeup, including the negative results from smaller isolation
+  # attempts (transient/conj! accumulator loop, test-helper's get-text-nodes
+  # alone). The diagnostic --ir-threshold step below remains necessary.
+  # 0.1.214 fixes two additional region optimization bugs with get and
+  # ambiguous function calls
+  # 0.1.215 fixes metadata handling in the JIT/AOT runtime (metadata wasn't
+  # hashed properly) -- and this closes the whole IR-tier promotion defect
+  # family: the stale-children symptom (probe 39) is fixed, confirmed clean
+  # across 4 repeated runs, and core-test at default settings now matches the
+  # --ir-threshold-disabled baseline exactly (13 failures, 1 error, identical
+  # test names on both sides). alias-test and string-test now pass 100% clean
+  # and are promoted to the gate. See STATUS.md "0.1.215" for the full writeup.
+  # 0.1.218 fixes tree-seq, filter empty output, and assoc-in handling an argument
+  # with metadata -- confirmed: probes 40/41 pass, and this also turned out to be
+  # the fix for the previously-un-minimized "wrong element reference" cluster
+  # (assoc-in corrupting a map down to just the newly-added branch). core-test now
+  # passes 200/200 at default settings on most runs. One flaky assertion remains,
+  # unrelated to tiering: regression-tests' attribute-update-order check fails
+  # ~50% of the time at BOTH default and --ir-threshold-disabled settings, traced
+  # to cljrs's HashSet using a randomized per-process seed (probe 42) -- unlike
+  # clj/cljs, the same #{:innerHTML :id} set iterates in a different order across
+  # separate process runs. core-test stays informational until this resolves or
+  # the assertion is rewritten. See STATUS.md "0.1.218" for the full writeup.
+  # 0.1.219 fixes iteration order of hash-map and hash-set
+  # Bump this (the cache key picks it up automatically) to track newer releases.
+  CLJRS_VERSION: "0.1.219"
+
+jobs:
+  pure-data-tests:
+    if: "!contains(github.event.head_commit.message, 'skip ci')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cljrs binary
+        id: cache-cljrs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cljrs
+          key: cljrs-${{ runner.os }}-${{ runner.arch }}-${{ env.CLJRS_VERSION }}
+
+      - name: Install cljrs
+        if: steps.cache-cljrs.outputs.cache-hit != 'true'
+        run: cargo install cljrs --version "=${{ env.CLJRS_VERSION }}"
+
+      - name: Version
+        run: cljrs --version
+
+      - name: Run pure-data tests (gate)
+        # All five suites now pass 100% clean under cljrs. transition-test is
+        # unblocked as of cljrs 0.1.196 (ns metadata) plus the :rust string-interop
+        # branch in transition.cljc. alias-test and string-test were promoted at
+        # 0.1.215, which fixed the last of a chain of Tier-1 IR-tier
+        # promotion/re-lowering bugs (0.1.211/212/213/215 -- see STATUS.md).
+        # core-test is promoted here as of 0.1.219: 0.1.218 fixed tree-seq, filter's
+        # empty-result handling, and assoc-in-with-metadata (see probes 40/41,
+        # STATUS.md "0.1.218"), and 0.1.219 fixed the one remaining flaky
+        # assertion -- cljrs's HashSet/HashMap now preserve insertion order
+        # instead of a randomized per-process seed (probe 42). Verified: 256/256
+        # assertions across all 5 namespaces pass, repeatably, at both default
+        # settings and with --ir-threshold disabled. See STATUS.md "0.1.219".
+        run: |
+          cljrs test \
+            --src-path src \
+            --src-path test \
+            replicant.hiccup-test \
+            replicant.transition-test \
+            replicant.alias-test \
+            replicant.string-test \
+            replicant.core-test
+
+      - name: Same suites with Tier-1 IR lowering disabled (diagnostic)
+        # DIAGNOSTIC, kept as a regression guard: cljrs's Tier-1 IR-tier
+        # promotion pass had a defect that surfaced under several symptoms
+        # across versions -- "not callable" (fixed 0.1.211), silent string
+        # corruption (fixed 0.1.212), non-deterministic crashes (fixed 0.1.213),
+        # and stale/empty children after promotion (fixed 0.1.215; see probe
+        # 39 and STATUS.md "0.1.215") -- all tied to functions called ~50-150+
+        # times. As of 0.1.219, this run is fully redundant with the gate above
+        # (both pass 256/256, repeatably) -- kept a while longer purely as a
+        # regression guard; remove if it stays redundant for a few more releases.
+        run: |
+          cljrs --ir-threshold 100000000 test \
+            --src-path src \
+            --src-path test \
+            replicant.core-test || echo "(remaining non-tier issues -- see STATUS.md)"
+
+      - name: cljrs reader/feature probes (diagnostic)
+        # Runs LAST so the PASS/FAIL matrix lands at the tail of the log (it was
+        # previously buried behind the test output). Each probe isolates one
+        # language/reader/runtime feature the port relies on, so a failure points
+        # at a precise cljrs deficiency. Tolerant: always exits 0.
+        if: always()
+        run: |
+          echo "cljrs feature matrix:"
+          for f in examples/cljrs-wasm/probes/*.cljrs; do
+            # src/test on the path so require-based probes can resolve replicant.*
+            # Strip cranelift_jit's multiline IR dump (an INFO-level log line
+            # cljrs emits unconditionally when a hot function gets JIT'd --
+            # not gated by --debug/--trace, and RUST_LOG doesn't suppress it
+            # either) before truncating, or its hundreds of chars of "ss0 =
+            # explicit_slot ..." noise eat the whole 300-char budget and hide
+            # the probe's actual PASS/FAIL message. Note: PASS/FAIL here means
+            # the script ran without cljrs erroring/crashing -- probes that
+            # self-check and print e.g. "BAD: ..." on a semantic mismatch
+            # still exit 0, so still show as PASS; read the printed message,
+            # not just the PASS/FAIL word, to see if the probe's own
+            # assertion held.
+            # Truncate output to one 300-char line so a failing probe's (sometimes
+            # pathologically nested/escaped) error blob can't swamp the matrix.
+            if out=$(cljrs run --src-path src --src-path test "$f" 2>&1); then
+              clean=$(printf '%s' "$out" | awk '/cranelift_jit/{skip=1} skip && /^}$/{skip=0; next} skip{next} {print}')
+              echo "PASS  $(basename "$f")  -> $(printf '%s' "$clean" | tr '\n' ' ' | cut -c1-300)"
+            else
+              clean=$(printf '%s' "$out" | awk '/cranelift_jit/{skip=1} skip && /^}$/{skip=0; next} skip{next} {print}')
+              echo "FAIL  $(basename "$f")  -> $(printf '%s' "$clean" | tr '\n' ' ' | cut -c1-300)"
+            fi
+          done
+          exit 0

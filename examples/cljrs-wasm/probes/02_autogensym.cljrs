@@ -1,0 +1,3 @@
+(ns cljrs-probe.autogensym)
+(defmacro m [] `(let [x# 1 y# 2] [x# y# (+ x# y#)]))
+(println "02 autogensym:" (m))

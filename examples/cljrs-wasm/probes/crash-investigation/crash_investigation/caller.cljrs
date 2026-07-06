@@ -1,0 +1,35 @@
+(ns crash-investigation.caller
+  (:require [crash-investigation.macro-ns :as m]))
+
+;; NEGATIVE RESULT, kept for the record. See doc/cljrs-port/STATUS.md
+;; ("Status at cljrs 0.1.212", bug 8) for the real find: a genuine cljrs
+;; crash, `panicked at rpds-1.2.1/src/vector/mod.rs:134: index out of bounds:
+;; the len is 2 but the index is 8`, seen under Replicant's actual test suite.
+;; Index 8 is the "text" slot in Replicant's 9-element hiccup-headers tuple,
+;; so somewhere in the real reconcile path a vector that should end up with 9
+;; elements intermittently gets built with only 2, once promoted.
+;;
+;; This file attempts the simplest hypothesis -- that building a 9-element
+;; tuple via a `->`-threaded chain of `conj` calls (exactly how
+;; hiccup_headers.cljc's `create` macro does it) is itself enough to trigger
+;; the truncation once warmed up via a cross-namespace macro alias, the same
+;; ingredient bug 5 needed. It is NOT: 60/60 calls below produce a correctly
+;; shaped 9-element vector. The real trigger needs more of Replicant's
+;; surrounding reconcile machinery than a bare conj-chain; not yet isolated.
+;;
+;; Run: cljrs run --src-path examples/cljrs-wasm/probes/crash-investigation \
+;;   examples/cljrs-wasm/probes/crash-investigation/crash_investigation/caller.cljrs
+;; Result (both before and after 0.1.212): "60 calls succeeded, all length 9"
+;; -- i.e. this particular hypothesis does not reproduce the crash.
+
+(defn build [tag] (m/create [tag nil] :a :b :c :d))
+
+(def bad (atom []))
+(dotimes [i 60]
+  (let [v (build :h1)]
+    (when (not= (count v) 9)
+      (swap! bad conj [i (count v) v]))))
+
+(if (seq @bad)
+  (println "BAD:" (count @bad) "first:" (first @bad))
+  (println "60 calls succeeded, all length 9"))

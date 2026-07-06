@@ -1,0 +1,14 @@
+(ns crash-investigation.macro-ns)
+;; Mirrors replicant.hiccup-headers/create's real macro shape (the :default /
+;; :rust branch): a `->`-threaded chain of 7 `conj` calls building a 9-element
+;; tuple from a 2-element base vector.
+(defmacro create [parsed-tag a b c d]
+  `(let [pt# ~parsed-tag]
+     (-> pt#
+         (conj ~a)
+         (conj ~b)
+         (conj ~c)
+         (conj ~d)
+         (conj nil)
+         (conj nil)
+         (conj nil))))

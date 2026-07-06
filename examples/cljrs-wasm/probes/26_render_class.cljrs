@@ -1,0 +1,4 @@
+(ns cljrs-probe.render-class
+  (:require [replicant.test-helper :as h]))
+(println "26 render-class:"
+         (-> (h/render [:h1 {:class ["c"]} "hi"]) h/get-mutation-log-events h/summarize))

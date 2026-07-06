@@ -1,0 +1,10 @@
+(ns cljrs-probe.proto-meta-xns
+  (:require [replicant.protocols :as p]))
+;; Isolates the core-test blocker. Probe 18 (protocol defined+extended+called in
+;; ONE namespace) passes, but the real mutation_log renderer fails with "No
+;; implementation of protocol IRender for type Object". The difference is
+;; cross-namespace: IRender is declared in replicant.protocols, extended via
+;; metadata here, and (in the real code) dispatched from replicant.core. Mirror
+;; that: non-empty map + metadata impl keyed by the protocol's qualified symbol.
+(def renderer (with-meta {:log []} {`p/attached? (fn [_ el] :attached)}))
+(println "25 xns-proto-meta:" (p/attached? renderer :el))

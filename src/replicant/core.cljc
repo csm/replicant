@@ -38,7 +38,8 @@
 
   vdom is another positional tuple (and native JS array in CLJS), and has
   similar macro accessors as the hiccup headers."
-  (:require [replicant.assert :as assert]
+  (:require [clojure.string :as str]
+            [replicant.assert :as assert]
             [replicant.asserts :as asserts]
             [replicant.errors :as errors]
             [replicant.hiccup :as h]
@@ -52,25 +53,49 @@
 #_(set! *warn-on-reflection* true)
 #_(set! *unchecked-math* :warn-on-boxed)
 
-(defn parse-tag [^clojure.lang.Keyword tag]
-  ;; Borrowed from hiccup, and adapted to support multiple classes
-  (let [ns ^String (namespace tag)
-        tag ^String (name tag)
-        id-index (let [index (.indexOf tag "#")] (when (pos? index) index))
-        class-index (let [index (.indexOf tag ".")] (when (pos? index) index))
-        tag-name (cond->> (cond
-                            id-index (.substring tag 0 id-index)
-                            class-index (.substring tag 0 class-index)
-                            :else tag)
-                   ns (keyword ns))
-        id (when id-index
-             (if class-index
-               (.substring tag (unchecked-inc-int id-index) class-index)
-               (.substring tag (unchecked-inc-int id-index))))
-        classes (when class-index
-                  (seq (.split (.substring tag (unchecked-inc-int class-index)) #?(:clj "\\." :cljs "."))))]
-    #?(:clj [tag-name id classes]
-       :cljs #js [tag-name id classes])))
+#?(:rust
+   ;; cljrs has no Java/JS string-method interop, so the :rust variant uses
+   ;; clojure.string / clojure.core equivalents. clojure.string/index-of returns
+   ;; nil (not -1) when absent, which folds naturally into the existing
+   ;; nil-guarded logic.
+   (defn parse-tag [tag]
+     (let [ns (namespace tag)
+           tag (name tag)
+           id-index (str/index-of tag "#")
+           class-index (str/index-of tag ".")
+           tag-name (cond->> (cond
+                               id-index (subs tag 0 id-index)
+                               class-index (subs tag 0 class-index)
+                               :else tag)
+                      ns (keyword ns))
+           id (when id-index
+                (if class-index
+                  (subs tag (inc id-index) class-index)
+                  (subs tag (inc id-index))))
+           classes (when class-index
+                     (seq (str/split (subs tag (inc class-index)) #"\.")))]
+       [tag-name id classes]))
+
+   :default
+   (defn parse-tag [^clojure.lang.Keyword tag]
+     ;; Borrowed from hiccup, and adapted to support multiple classes
+     (let [ns ^String (namespace tag)
+           tag ^String (name tag)
+           id-index (let [index (.indexOf tag "#")] (when (pos? index) index))
+           class-index (let [index (.indexOf tag ".")] (when (pos? index) index))
+           tag-name (cond->> (cond
+                               id-index (.substring tag 0 id-index)
+                               class-index (.substring tag 0 class-index)
+                               :else tag)
+                      ns (keyword ns))
+           id (when id-index
+                (if class-index
+                  (.substring tag (unchecked-inc-int id-index) class-index)
+                  (.substring tag (unchecked-inc-int id-index))))
+           classes (when class-index
+                     (seq (.split (.substring tag (unchecked-inc-int class-index)) #?(:clj "\\." :cljs "."))))]
+       #?(:clj [tag-name id classes]
+          :cljs #js [tag-name id classes]))))
 
 (defn get-hiccup-headers
   "Hiccup symbols can include tag name, id and classes. The argument map is
@@ -120,9 +145,12 @@
                               (cond
                                 (keyword? class) (name class)
                                 (symbol? class) (name class)
-                                (string? class) (not-empty (.trim ^String class)))))
+                                (string? class) (not-empty #?(:rust (str/trim class)
+                                                              :default (.trim ^String class))))))
                          classes)
-    (string? classes) (keep #(not-empty (.trim ^String %)) (.split ^String classes " "))
+    (string? classes) (keep #(not-empty #?(:rust (str/trim %) :default (.trim ^String %)))
+                            #?(:rust (str/split classes #" ")
+                               :default (.split ^String classes " ")))
     :else (throw (ex-info "class name is neither string, keyword, or a collection of those"
                           {:classes classes}))))
 
@@ -158,9 +186,10 @@
   "Converts string values for the style attribute to a map of keyword keys and
   string values."
   [^String s]
-  (->> (.split s ";")
+  (->> #?(:rust (str/split s #";") :default (.split s ";"))
        (map (fn [^String kv]
-              (let [[k v] (map #(.trim ^String %) (.split kv ":"))]
+              (let [[k v] (map #?(:rust #(str/trim %) :default #(.trim ^String %))
+                              #?(:rust (str/split kv #":") :default (.split kv ":")))]
                 [(keyword k) v])))
        (into {})))
 
@@ -295,7 +324,7 @@
 (def ^:dynamic *dispatch* nil)
 
 (defn build-event-map [e]
-  (let [node #?(:cljs (.-target e) :clj nil)]
+  (let [node #?(:cljs (.-target e) :rust (:target e) :clj nil)]
     (cond-> {:replicant/trigger :replicant.trigger/dom-event
              :replicant/dom-event e}
       node (assoc :replicant/node node)
@@ -483,10 +512,10 @@
     (asserts/assert-no-event-attribute attr)
     (asserts/assert-valid-attribute-name attr v)
     (->> (cond-> {}
-           (= 0 (.indexOf an "xml:"))
+           #?(:rust (str/starts-with? an "xml:") :default (= 0 (.indexOf an "xml:")))
            (assoc :ns xmlns)
 
-           (= 0 (.indexOf an "xlink:"))
+           #?(:rust (str/starts-with? an "xlink:") :default (= 0 (.indexOf an "xlink:")))
            (assoc :ns xlinkns))
          (r/set-attribute renderer el an (cond-> v
                                            (or (keyword? v)
@@ -588,13 +617,15 @@
                  (get-hiccup-headers nil)
                  (hiccup/from-alias headers)))
           (catch #?(:clj Exception
-                    :cljs :default) e
+                    :cljs :default
+                    :rust :default) e
             (or (when on-alias-exception
                   (->> (on-alias-exception e [tag-name attrs children])
                        (get-hiccup-headers nil)))
                 (->> [:div {:data-replicant-error "Alias threw exception"
                             :data-replicant-exception #?(:clj (.getMessage e)
-                                                         :cljs (.-message e))
+                                                         :cljs (.-message e)
+                                                         :rust (ex-message e))
                             :data-replicant-sexp (pr-str (hiccup/sexp headers))}]
                      (get-hiccup-headers nil)))))))))
 
@@ -1022,6 +1053,7 @@
           (let [[children ks] (get-children-ks
                                (hiccup/create
                                 #?(:cljs #js [nil nil nil]
+                                   :rust [nil nil nil]
                                    :clj [nil nil nil]) nil hiccup nil nil) nil)]
             (-> (update-children
                  impl el

@@ -1,0 +1,6 @@
+(ns cljrs-probe.render-reconcile
+  (:require [replicant.test-helper :as h]))
+;; Reproduce the core-test path: reconcile through the mutation_log fake renderer
+;; (IRender supplied via :extend-via-metadata). This is where core-test's 185
+;; "not callable: <fn>" errors come from.
+(println "23 render:" (-> (h/render [:h1 "hi"]) h/get-mutation-log-events h/summarize))

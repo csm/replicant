@@ -1,0 +1,35 @@
+;; Found while narrowing the 13 core-test failures that remain after 0.1.215
+;; closed the IR-tier promotion defect family (see STATUS.md "Narrowing the
+;; 13 remaining core-test failures"). `replicant.mutation-log/get-node-ids`
+;; uses `tree-seq` to walk the fake-DOM element tree and collect node ids,
+;; which `attached?` (and thus the on-render/on-unmount staleness detection
+;; in `core.cljc`'s `get-hooks-to-call`) depends on. It always came back
+;; empty, so `attached?` always returned false, so every node with an
+;; on-render/on-unmount hook got an extra, spurious `:unmount` life-cycle
+;; event fired on every subsequent render.
+;;
+;; Root cause, isolated here: `tree-seq` itself always returns nil/empty,
+;; even for the simplest possible input -- a single leaf that is never even
+;; a branch. This is a total break, not an edge case: real Clojure always
+;; returns at least the root as the first (and here, only) element.
+;;
+;; A hand-written equivalent (same lazy-seq/cons/mapcat/letfn shape as
+;; Clojure's actual tree-seq implementation) works correctly under cljrs, so
+;; this isn't a general lazy-seq problem -- it's specific to the built-in
+;; `tree-seq` function.
+;;
+;; Run: cljrs run examples/cljrs-wasm/probes/40_tree_seq_broken.cljrs
+;; Expected (correct): "(:leaf)" and "(1 (2 3) 4)"-shaped results, never nil.
+;; Actual (cljrs 0.1.215): every tree-seq call returns nil.
+(defn my-tree-seq [branch? children root]
+  (letfn [(walk [node]
+            (lazy-seq
+             (cons node
+                   (when (branch? node)
+                     (mapcat walk (children node))))))]
+    (walk root)))
+
+(println "built-in tree-seq, single leaf:" (pr-str (tree-seq (constantly false) (constantly nil) :leaf)))
+(println "built-in tree-seq, classic example:" (pr-str (tree-seq seq? identity '(1 (2 3) 4))))
+(println "hand-written equivalent, single leaf:" (pr-str (my-tree-seq (constantly false) (constantly nil) :leaf)))
+(println "hand-written equivalent, classic example:" (pr-str (my-tree-seq seq? identity '(1 (2 3) 4))))

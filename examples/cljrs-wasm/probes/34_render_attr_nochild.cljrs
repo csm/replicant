@@ -1,0 +1,7 @@
+(ns cljrs-probe.render-attr-nochild
+  (:require [replicant.test-helper :as h]))
+;; Truth table: (no-attrs,children)=probe 23 PASS; (attrs,no-children direct
+;; set-attributes)=probe 33 PASS; (attrs,children)=probe 29 FAIL. Missing cell:
+;; a FULL create-node render with attrs but NO children.
+(println "34 attr-nochild:"
+         (-> (h/render [:h1 {:title "t"}]) h/get-mutation-log-events h/summarize))

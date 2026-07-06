@@ -1,0 +1,3 @@
+(ns cljrs-probe.walk
+  (:require [clojure.walk :as walk]))
+(println "08 clojure.walk:" (walk/postwalk identity {:a [1 2] :b "c"}))

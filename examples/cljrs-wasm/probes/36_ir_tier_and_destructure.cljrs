@@ -1,0 +1,23 @@
+(ns cljrs-probe.ir-tier-and-destructure
+  (:require [replicant.test-helper :as h]))
+(defn msg [e] (let [s (str (ex-message e))] (subs s 0 (min 60 (count s)))))
+;; 1. Tier-1 IR lowering miscompiles (~10th call -> permanent "not callable").
+;;    Identical call: iterations 0-9 succeed, 10+ all fail on default settings;
+;;    0 failures with --ir-threshold 100000000. --jit-threshold does NOT gate it.
+(let [one (fn [] (-> (h/render [:h1 {:title "Hello"} "x"])
+                     (h/render [:h1 {:title nil} "x"])
+                     h/get-mutation-log-events h/summarize vec))
+      fails (atom [])]
+  (dotimes [i 20]
+    (try (one) (catch :default e (swap! fails conj i))))
+  (println "36a ir-tier: fails" (count @fails) "of 20, first at iter" (first @fails)
+           "(expected: 0 fails)"))
+;; 2. Namespaced-keyword :keys destructuring does not bind the local.
+(println "36b ns-keys:"
+         (try (pr-str (let [{:keys [ui/dest]} {:ui/dest 2}] dest))
+              (catch :default e (str "THROW " (msg e))))
+         "(expected: 2)")
+(println "36c ns-qualified-keys:"
+         (try (pr-str (let [{:ui/keys [dest]} {:ui/dest 3}] dest))
+              (catch :default e (str "THROW " (msg e))))
+         "(expected: 3)")

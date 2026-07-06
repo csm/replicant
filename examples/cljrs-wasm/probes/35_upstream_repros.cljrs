@@ -1,0 +1,21 @@
+(ns cljrs-probe.upstream-repros
+  (:require [clojure.walk :as walk]))
+;; Minimal repros for the three cljrs bugs behind ALL remaining suite failures
+;; (found via local interactive bisection; see doc/cljrs-port/STATUS.md).
+(defn msg [e] (let [s (str (ex-message e))] (subs s 0 (min 60 (count s)))))
+(defn try* [label expected thunk]
+  (println label "expected:" expected "actual:"
+           (try (pr-str (thunk)) (catch :default e (str "THROW " (msg e))))))
+;; 1. map-entry? true for plain 2-element vectors (Clojure: false).
+;;    Breaks replicant.hiccup/hiccup? -> all 2-element hiccup renders as text.
+(try* "35a (map-entry? [:a 1])" "false" #(map-entry? [:a 1]))
+;; 2. (empty m) on a map WITH metadata returns nil (Clojure: {} + meta kept).
+;;    Breaks clojure.walk (into (empty form) ...) -> the WrongType wave, since
+;;    mutation-log nodes carry {:parent ...} metadata.
+(try* "35b (empty ^meta {})" "{}" #(empty (with-meta {:a 1} {:p 1})))
+(try* "35c walk meta map" "hi" #(walk/postwalk
+                                 (fn [x] (if (:text x) (:text x) x))
+                                 (with-meta {:text "hi"} {:p 1})))
+;; 3. % under deref sugar @% is not counted by the #() arg scanner -> 0-arity fn.
+;;    Breaks mutation-log -replace-child (#(::id @%)) -> all text-node updates.
+(try* "35d (#(:x @%) atom)" "1" #((fn [] (#(:x @%) (atom {:x 1})))))

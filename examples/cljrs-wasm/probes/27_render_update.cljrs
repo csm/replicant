@@ -1,0 +1,7 @@
+(ns cljrs-probe.render-update
+  (:require [replicant.test-helper :as h]))
+;; Does a second render (the reconcile/update/diff path) trigger "not callable"?
+(println "27 render-update:"
+         (-> (h/render [:h1 {} "a"])
+             (h/render [:h1 {} "b"])
+             h/get-mutation-log-events h/summarize))

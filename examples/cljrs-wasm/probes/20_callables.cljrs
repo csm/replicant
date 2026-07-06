@@ -1,0 +1,12 @@
+(ns cljrs-probe.callables)
+;; Chase "not callable: <fn> is not callable". Replicant leans on these callable
+;; patterns pervasively; find which one cljrs rejects.
+(println "20a comp:"        ((comp inc inc) 40))
+(println "20b partial:"     ((partial + 40) 2))
+(println "20c keyword-fn:"  (:k {:k 42}))
+(println "20d set-fn:"      (boolean (#{:a :b} :a)))
+(println "20e map-fn:"      ({:k 42} :k))
+(println "20f fn-from-map:" ((get {:f inc} :f) 41))
+(println "20g apply:"       (apply + [1 2 3 34]))
+(println "20h map-anon:"    (map (fn [x] (* x 2)) [1 2 3]))
+(println "20i keep-anon:"   (keep #(when (odd? %) %) [1 2 3]))

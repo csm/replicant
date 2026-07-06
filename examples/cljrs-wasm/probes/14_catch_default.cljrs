@@ -1,0 +1,4 @@
+(ns cljrs-probe.catch-default)
+;; core.cljc and dom.cljc use (catch :default e ...); confirm cljrs accepts it.
+(println "14 catch-default:"
+         (try (throw (ex-info "boom" {})) (catch :default e (ex-message e))))

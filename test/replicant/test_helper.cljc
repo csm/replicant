@@ -39,8 +39,12 @@
   (keyword (str tag-name (when id (str "#" id)))))
 
 (defn format-element [el]
-  (if (instance? #?(:clj clojure.lang.Atom
-                    :cljs cljs.core/Atom) el)
+  ;; cljrs provides clojure.core/atom? and does not map clojure.lang.Atom (see
+  ;; mutation-log/atom?); without a :rust arm the conditional splices nothing
+  ;; and instance? is called with one arg.
+  (if #?(:rust (clojure.core/atom? el)
+         :default (instance? #?(:clj clojure.lang.Atom
+                                :cljs cljs.core/Atom) el))
     (format-element @el)
     (if (:tag-name el)
       (vec (remove blank? [(get-tag-name el) (get-text el)]))

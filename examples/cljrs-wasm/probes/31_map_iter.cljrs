@@ -1,0 +1,13 @@
+(ns cljrs-probe.map-iter)
+;; set-attributes does (run! (fn [[attr v]] ...) attr-map) and update-attributes
+;; does (reduce ... (into (set (keys new)) (keys old))). Probe 21 only tested
+;; run! over a VECTOR. Test iterating a MAP with entry destructuring.
+(def m {:title "t" :id "x"})
+(run! (fn [[k v]] nil) m)
+(println "31a run!-map-destructure: ok")
+(println "31b map-destructure:" (doall (map (fn [[k v]] [k v]) m)))
+(doseq [[k v] m] nil)
+(println "31c doseq-map: ok")
+(println "31d first-entry:" (let [[k v] (first m)] [k v]))
+(println "31e set-keys:" (into (set (keys m)) (keys {:z 1})))
+(println "31 map-iter: ok")
