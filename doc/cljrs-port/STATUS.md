@@ -594,6 +594,75 @@ visible under `--ir-threshold`-disabled back at 0.1.210 — i.e. the diagnostic
 step and the default-settings run now agree, so the diagnostic step's job is
 done; it's kept in CI a while longer purely as a regression guard.
 
+### Narrowing the 13 remaining core-test failures (post-0.1.215)
+
+With the IR-tier promotion family closed, the 13 remaining `core-test`
+failures are unrelated to tiering (they occur identically with
+`--ir-threshold` disabled). Dug into each cluster; found two clean,
+zero-Replicant-dependency cljrs bugs and precisely characterized a third.
+
+**Bug: `tree-seq` always returns nil (probe 40).** Explains
+`lifecycle-test` (×2) and `lifecycle-on-unmount-test`'s "Does not trigger
+on-{render,unmount} when there are no updates" failures — 3 of the 13.
+
+`replicant.mutation-log/get-node-ids` uses `tree-seq` to walk the fake-DOM
+tree and collect node ids; `attached?` depends on it to decide whether a
+node with a registered on-render/on-unmount hook has actually left the DOM
+(`core.cljc`'s `get-hooks-to-call`, which fires a deferred `:unmount` hook
+for any registered node it finds no longer attached). Isolated: cljrs's
+built-in `tree-seq` returns `nil` for *any* input, even the simplest
+possible case — `(tree-seq (constantly false) (constantly nil) :leaf)`
+should return `(:leaf)` (real Clojure always includes at least the root)
+but returns `nil`. A hand-rolled equivalent using the same
+`lazy-seq`/`cons`/`mapcat`/`letfn` shape as Clojure's actual implementation
+works fine under cljrs, so this isn't a general lazy-seq defect — it's
+specific to the built-in `tree-seq`. Net effect: `attached?` always returns
+false, so `get-hooks-to-call` treats every hook-bearing node as having just
+been removed and fires a spurious extra `:unmount` life-cycle event on
+every render after the first.
+
+**Bug: `filter` returns `nil` instead of `()` for an empty result (probe
+41).** Explains `render-test`'s "Ignores nil style" failure — 1 of the 13.
+
+`(filter (comp #{:set-style} first) events)` returns `nil` when nothing
+matches, where real Clojure returns `()` (empty, but not nil, and `(= () [])`
+holds). The test asserts `(= (filter ...) [])`, which fails against `nil`.
+Minimal and complete: `(filter even? [1 3 5])` alone reproduces it.
+
+**Narrowed but not yet minimized: a real map's keys get discarded down to
+just the newly-`assoc-in`'d branch, but only when reached through the real
+reconcile call chain.** Likely explains `event-handler-test`'s "Changes
+handler" and several of the remaining `unmounting-test` failures — the
+ones whose `actual:` shows a bare attrs map (e.g. `{:on {:click fn}}` or
+`{:style {:width "0px"}}`) standing in for what should be a full,
+formatted `[:tag "text"]` element reference.
+
+Traced with an instrumented copy of `mutation_log.cljc`: going from
+`[:h1 "Hi!"]` to `[:h1 {:on {:click f1}} "Hi!"]`, `set-event-handler`'s
+`(log this [:set-event-handler el ...])` call correctly snapshots `el` as
+the full `{:tag-name "h1", :replicant.mutation-log/id 1, :children [...]}`
+map (proving the right atom was reached) — but the very next line in the
+same function, `(assoc-in @el [:on event] handler)`, evaluated with a
+`println` right there, already returns just `{:on {:click #<Fn>}}`, and the
+subsequent `swap!` commits that truncated value, permanently discarding
+`:tag-name`/`:children`/the id.
+
+The puzzle: this exact `assoc-in` call is **not** reproducible standalone.
+Tried, all clean: a plain map with the same shape (namespaced-keyword id,
+vector-of-atom children, real function as the value being assoc'd in);
+calling the real `mutation-log-impl` reify map's `set-event-handler`
+function directly (bypassing `core.cljc` entirely) with the exact same
+`el`; invoking it through a from-scratch `extend-via-metadata` protocol
+object rather than mutation-log's own. All of these return the correctly
+merged map. The corruption only appears when `r/set-event-handler` is
+reached via the real call chain (`reconcile*` → `reconcile-attributes` →
+`update-attributes` → `update-attr` → `update-event-listeners` →
+`r/set-event-handler`), i.e. from several frames of real `core.cljc`
+closures/loops deep, not from a top-level call. Flagging this precisely
+rather than guessing further; a repro that requires this much of the real
+call depth is a lead for the cljrs maintainer to chase from the trace
+above, not yet a committed probe.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1

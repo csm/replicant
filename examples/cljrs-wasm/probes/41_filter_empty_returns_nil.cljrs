@@ -1,0 +1,21 @@
+;; Found while narrowing the 13 core-test failures that remain after 0.1.215
+;; closed the IR-tier promotion defect family (see STATUS.md "Narrowing the
+;; 13 remaining core-test failures"). core-test's "Ignores nil style" fails
+;; with `expected: [] actual: nil` on
+;; `(->> events h/get-mutation-log-events h/summarize (filter (comp #{:set-style} first)))`.
+;;
+;; Root cause, isolated here: `filter` returns `nil` instead of an empty seq
+;; `()` when nothing matches the predicate. In real Clojure,
+;; `(= (filter even? [1 3 5]) [])` is true (both are empty sequential
+;; collections); under cljrs it's false because `filter` hands back `nil`,
+;; and `(= nil [])` is false.
+;;
+;; Run: cljrs run examples/cljrs-wasm/probes/41_filter_empty_returns_nil.cljrs
+;; Expected (correct): result is `()`, `(= result [])` is true, `(nil? result)` is false.
+;; Actual (cljrs 0.1.215): result prints as `nil`, `(= result [])` is false,
+;; `(nil? result)` is true.
+(def result (filter (comp #{:set-style} first) [[:set-attribute "x"] [:set-attribute "y"]]))
+(println "result:" (pr-str result))
+(println "(= result []):" (= result []))
+(println "(empty? result):" (empty? result))
+(println "(nil? result):" (nil? result))
