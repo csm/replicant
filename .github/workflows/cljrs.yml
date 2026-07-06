@@ -106,8 +106,9 @@ env:
   # clj/cljs, the same #{:innerHTML :id} set iterates in a different order across
   # separate process runs. core-test stays informational until this resolves or
   # the assertion is rewritten. See STATUS.md "0.1.218" for the full writeup.
+  # 0.1.219 fixes iteration order of hash-map and hash-set
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.218"
+  CLJRS_VERSION: "0.1.219"
 
 jobs:
   pure-data-tests:
