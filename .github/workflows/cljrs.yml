@@ -96,7 +96,16 @@ env:
   # test names on both sides). alias-test and string-test now pass 100% clean
   # and are promoted to the gate. See STATUS.md "0.1.215" for the full writeup.
   # 0.1.218 fixes tree-seq, filter empty output, and assoc-in handling an argument
-  # with metadata.
+  # with metadata -- confirmed: probes 40/41 pass, and this also turned out to be
+  # the fix for the previously-un-minimized "wrong element reference" cluster
+  # (assoc-in corrupting a map down to just the newly-added branch). core-test now
+  # passes 200/200 at default settings on most runs. One flaky assertion remains,
+  # unrelated to tiering: regression-tests' attribute-update-order check fails
+  # ~50% of the time at BOTH default and --ir-threshold-disabled settings, traced
+  # to cljrs's HashSet using a randomized per-process seed (probe 42) -- unlike
+  # clj/cljs, the same #{:innerHTML :id} set iterates in a different order across
+  # separate process runs. core-test stays informational until this resolves or
+  # the assertion is rewritten. See STATUS.md "0.1.218" for the full writeup.
   # Bump this (the cache key picks it up automatically) to track newer releases.
   CLJRS_VERSION: "0.1.218"
 

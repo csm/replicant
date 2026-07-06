@@ -1,0 +1,36 @@
+;; Found while re-verifying core-test after 0.1.218 fixed tree-seq, filter,
+;; and assoc-in-with-metadata (see STATUS.md "0.1.218" and probes 40/41).
+;; core-test now passes 200/200 at default settings on most runs, but
+;; `regression-tests` ("Text fragments shouldn't trip Replicant into
+;; removing the wrong span") flakes at roughly a 50% rate -- and identically
+;; so with `--ir-threshold` disabled, so it isn't tiering-related.
+;;
+;; Root cause: the failing assertion checks the exact ORDER of two
+;; attribute-update mutation-log events (:innerHTML then :id) produced by
+;; iterating `(into (set (keys new-attrs)) (keys old-attrs))` in
+;; `core.cljc/update-attributes`. Iterating a literal 2-keyword set here
+;; reproduces it directly: the SAME set, in a fresh process each time,
+;; comes back in a DIFFERENT order roughly half the time. This looks like
+;; Rust's default HashMap/HashSet using a randomized per-process hash seed
+;; (SipHash with a random key, the std library default, normally meant to
+;; resist hash-flooding attacks) -- unlike JVM Clojure or ClojureScript,
+;; where a given set of keywords hashes to the same bucket order on every
+;; run of the same program.
+;;
+;; This is arguably not a "bug" in the sense of violating the Clojure spec
+;; (set/map iteration order is unspecified) -- but it's a real behavioral
+;; difference from clj/cljs's practically-stable ordering, and it makes any
+;; test (or, potentially, real user code) that depends on observing hash-set
+;; iteration order in a fixed sequence flaky specifically under cljrs, in a
+;; way it would not be under clj/cljs. Flagging for awareness rather than as
+;; a definite defect: worth cljrs documenting explicitly, or offering a
+;; deterministic-seed mode, since Replicant's test suite is not the only
+;; code that could be surprised by this.
+;;
+;; Run: cljrs run examples/cljrs-wasm/probes/42_hashset_order_nondeterministic.cljrs
+;; (repeatedly, as a fresh process each time)
+;; Expected if order were stable across runs (clj/cljs-like): always the
+;; same order. Actual (cljrs 0.1.218): flips between orders across
+;; separate process invocations, roughly 50/50.
+(def s (into #{} [:innerHTML :id]))
+(println (pr-str (seq s)))

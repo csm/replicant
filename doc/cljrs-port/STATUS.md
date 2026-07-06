@@ -663,6 +663,52 @@ rather than guessing further; a repro that requires this much of the real
 call depth is a lead for the cljrs maintainer to chase from the trace
 above, not yet a committed probe.
 
+### Status at cljrs 0.1.218 — core-test is functionally clean; one flaky assertion remains
+
+0.1.218's release notes cite fixing `tree-seq`, `filter`'s empty-result
+handling, and `assoc-in` on an argument with metadata — precisely the first
+two bugs found in the previous section, plus (it turns out) the same root
+cause as the third (traced there to `assoc-in` corrupting a map down to just
+the newly-added branch; metadata attached to one of the values involved was
+apparently the missing ingredient the standalone repro attempts lacked).
+Verified locally (`cargo install cljrs --version =0.1.218`):
+
+- **Probes 40 (tree-seq) and 41 (filter-empty) are FIXED** — both now
+  produce correct output.
+- **Probe 39 (stale-children) still passes** — no regression.
+- **`core-test` passes 200/200 at default settings on most runs** — up from
+  199/200 (13 failures + 1 error) pre-0.1.215. The "wrong element reference"
+  cluster (event-handler-test, several unmounting-test entries) that
+  couldn't be minimized to a standalone repro is gone along with the
+  `assoc-in` fix.
+
+**One flaky assertion remains, unrelated to tiering.**
+`regression-tests`' "Text fragments shouldn't trip Replicant into removing
+the wrong span" fails intermittently (roughly 50% of runs, both at default
+settings and with `--ir-threshold` disabled — confirmed by running each 5
+times) on the exact *order* of two attribute-update mutation-log events
+(`:innerHTML` then `:id`, or the reverse).
+
+Root cause (probe 42): `core.cljc/update-attributes` iterates
+`(into (set (keys new-attrs)) (keys old-attrs))` to decide which attribute
+to update first. Set iteration order is unspecified by the Clojure spec,
+but in practice is *stable* across runs in both JVM Clojure and
+ClojureScript (keyword hash codes don't change between runs of the same
+program). Under cljrs, the identical two-keyword set
+`(into #{} [:innerHTML :id])`, printed in a fresh process each time, flips
+between `(:id :innerHTML)` and `(:innerHTML :id)` roughly 50/50 across
+separate invocations — consistent with Rust's default `HashMap`/`HashSet`
+using a randomized per-process hash seed (SipHash, keyed randomly at
+process start, the Rust std default meant to resist hash-flooding attacks).
+
+This is arguably not a spec violation, but it's a real behavioral
+difference from clj/cljs, worth cljrs flagging explicitly (or offering a
+deterministic-seed mode for testing) since any code relying on observed
+hash-collection order — not just this one Replicant test — would be
+surprised by it. `core-test` stays in the informational CI step rather
+than the hard gate until this is resolved or the assertion is rewritten to
+not depend on attribute-update order.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1
