@@ -559,6 +559,41 @@ No movement on the stale-children symptom. Still the same recommendation:
 this is the fourth symptom of the one underlying IR-tier promotion defect,
 and the committed 150-call repro above remains the most precise lead for it.
 
+### Status at cljrs 0.1.215 — the IR-tier promotion defect family is closed
+
+0.1.215 fixes metadata handling in the JIT/AOT runtime (metadata wasn't
+hashed properly). Verified locally (`cargo install cljrs --version =0.1.215`):
+
+- **Probe 39 (stale-children-after-promotion) is FIXED.** 4 repeated runs all
+  print `"200 calls succeeded, text preserved"` — no more corruption at call
+  150 or anywhere else.
+- **`core-test` at default settings now matches the `--ir-threshold`-disabled
+  baseline exactly**, not just in count but in which tests fail: two fresh
+  default-settings runs gave 14 and 13 failures (1 error, no crash); the
+  `--ir-threshold`-disabled run gave 13 failures (1 error). Diffing the
+  failing test names between a default run and the IR-disabled run shows an
+  **identical set** — `event-handler-test`, `lifecycle-on-unmount-test`,
+  `lifecycle-test` (×2), `render-test`, `unmounting-test` (×8) — the same 13
+  pre-existing genuine semantic-diff issues already documented above (stray
+  nils from quoted-list children, a couple of untriaged assertion diffs).
+  Full parity: nothing left that's attributable to IR-tier promotion.
+- **`alias-test` and `string-test` now pass 100% clean** (45 assertions, 0
+  failures, 0 errors) — promoted from the informational step to the gate in
+  CI.
+- Probes 37, 38, and the bug-5 standalone repro still pass — no regressions.
+
+This closes out the defect family tracked since 0.1.207: "not callable"
+(fixed 0.1.211), silent string corruption (fixed 0.1.212), non-deterministic
+crashes (fixed 0.1.213), and stale/empty children after promotion (fixed
+0.1.215). All four turned out to be symptoms of one underlying root cause in
+the Tier-1 IR/JIT promotion pass, each surfacing once a function or call site
+crossed a cumulative call-count threshold (~50 calls for the first three,
+~150 for the last). `core-test` at default tier settings is now blocked only
+by the same 13 genuine, pre-existing semantic-diff issues that were already
+visible under `--ir-threshold`-disabled back at 0.1.210 — i.e. the diagnostic
+step and the default-settings run now agree, so the diagnostic step's job is
+done; it's kept in CI a while longer purely as a regression guard.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1
