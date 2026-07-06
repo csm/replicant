@@ -136,16 +136,18 @@ jobs:
         run: cljrs --version
 
       - name: Run pure-data tests (gate)
-        # Suites that load and pass under cljrs today. transition-test is
+        # All five suites now pass 100% clean under cljrs. transition-test is
         # unblocked as of cljrs 0.1.196 (ns metadata) plus the :rust string-interop
-        # branch in transition.cljc. alias-test and string-test are promoted here
-        # as of cljrs 0.1.215, which fixed the last of a chain of Tier-1 IR-tier
-        # promotion/re-lowering bugs (0.1.211/212/213/215 -- see STATUS.md); both
-        # now pass 100% clean at default tier settings. core-test remains in the
-        # informational step below: it has 13 pre-existing genuine semantic-diff
-        # failures unrelated to IR tiering (stray nils from quoted-list children,
-        # a couple of untriaged assertion diffs -- see STATUS.md), not a cljrs
-        # runtime gap in the tiering sense.
+        # branch in transition.cljc. alias-test and string-test were promoted at
+        # 0.1.215, which fixed the last of a chain of Tier-1 IR-tier
+        # promotion/re-lowering bugs (0.1.211/212/213/215 -- see STATUS.md).
+        # core-test is promoted here as of 0.1.219: 0.1.218 fixed tree-seq, filter's
+        # empty-result handling, and assoc-in-with-metadata (see probes 40/41,
+        # STATUS.md "0.1.218"), and 0.1.219 fixed the one remaining flaky
+        # assertion -- cljrs's HashSet/HashMap now preserve insertion order
+        # instead of a randomized per-process seed (probe 42). Verified: 256/256
+        # assertions across all 5 namespaces pass, repeatably, at both default
+        # settings and with --ir-threshold disabled. See STATUS.md "0.1.219".
         run: |
           cljrs test \
             --src-path src \
@@ -153,29 +155,19 @@ jobs:
             replicant.hiccup-test \
             replicant.transition-test \
             replicant.alias-test \
-            replicant.string-test
+            replicant.string-test \
+            replicant.core-test
 
-      - name: Run pure-data tests blocked on cljrs runtime gaps (informational)
-        # Remaining runtime cljrs gaps tracked in doc/cljrs-port/STATUS.md.
-        # Tolerant: promotes to the gate once it passes clean.
-        run: |
-          cljrs test \
-            --src-path src \
-            --src-path test \
-            replicant.core-test || echo "(still blocked on genuine semantic-diff issues -- see STATUS.md)"
-
-      - name: Same suite with Tier-1 IR lowering disabled (diagnostic)
+      - name: Same suites with Tier-1 IR lowering disabled (diagnostic)
         # DIAGNOSTIC, kept as a regression guard: cljrs's Tier-1 IR-tier
         # promotion pass had a defect that surfaced under several symptoms
         # across versions -- "not callable" (fixed 0.1.211), silent string
         # corruption (fixed 0.1.212), non-deterministic crashes (fixed 0.1.213),
         # and stale/empty children after promotion (fixed 0.1.215; see probe
         # 39 and STATUS.md "0.1.215") -- all tied to functions called ~50-150+
-        # times. As of 0.1.215, core-test at default settings matches this
-        # --ir-threshold-disabled run exactly (same 13 failures, same 1 error,
-        # both sides) -- i.e. full parity, the IR-tier defect family is closed.
-        # Left in place to catch any regression; remove if it stays redundant
-        # for a few more releases.
+        # times. As of 0.1.219, this run is fully redundant with the gate above
+        # (both pass 256/256, repeatably) -- kept a while longer purely as a
+        # regression guard; remove if it stays redundant for a few more releases.
         run: |
           cljrs --ir-threshold 100000000 test \
             --src-path src \

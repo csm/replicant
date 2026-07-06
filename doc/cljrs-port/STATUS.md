@@ -709,6 +709,31 @@ surprised by it. `core-test` stays in the informational CI step rather
 than the hard gate until this is resolved or the assertion is rewritten to
 not depend on attribute-update order.
 
+### Status at cljrs 0.1.219 — all five pure-data suites pass clean
+
+0.1.219 makes hash-map and hash-set iteration order insertion-order-stable
+instead of a randomized per-process seed, closing the one remaining flaky
+assertion from 0.1.218. Verified locally (`cargo install cljrs --version
+=0.1.219`):
+
+- **Probe 42 (hash-set order) is FIXED** — the same `#{:innerHTML :id}`
+  literal now prints in the same order across repeated fresh-process runs
+  (4/4 identical), instead of flipping ~50/50.
+- **`core-test` passes 200/200, repeatably** — 3 fresh runs at default
+  settings, 3 more with `--ir-threshold` disabled, all clean, no flakiness.
+- **All five suites together: 256/256 assertions pass**, both at default
+  tier settings and with the IR tier disabled.
+
+`core-test` is promoted to the CI gate alongside the other four suites —
+all of Replicant's pure-data test coverage now passes cleanly under cljrs.
+This closes out the whole investigation arc started back at 0.1.207: every
+bug found along the way (IR-tier promotion corruption in its four
+symptoms, `tree-seq`, `filter`'s empty-result handling, `assoc-in` with
+metadata, and hash-collection iteration order) is now fixed upstream, with
+no workarounds needed in Replicant's own source. The `--ir-threshold`-
+disabled diagnostic step is kept a while longer purely as a regression
+guard, now that it's fully redundant with the gate.
+
 ### Result
 
 `replicant.hiccup-test` passes under cljrs. With cljrs 0.1.196 (reader gap #1
