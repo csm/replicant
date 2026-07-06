@@ -95,8 +95,10 @@ env:
   # --ir-threshold-disabled baseline exactly (13 failures, 1 error, identical
   # test names on both sides). alias-test and string-test now pass 100% clean
   # and are promoted to the gate. See STATUS.md "0.1.215" for the full writeup.
+  # 0.1.218 fixes tree-seq, filter empty output, and assoc-in handling an argument
+  # with metadata.
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.215"
+  CLJRS_VERSION: "0.1.218"
 
 jobs:
   pure-data-tests:
