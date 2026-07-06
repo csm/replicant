@@ -88,8 +88,9 @@ env:
   # alone). The diagnostic --ir-threshold step below remains necessary.
   # 0.1.214 fixes two additional region optimization bugs with get and
   # ambiguous function calls
+  # 0.1.215 fixes metadata handling in the JIT runtime
   # Bump this (the cache key picks it up automatically) to track newer releases.
-  CLJRS_VERSION: "0.1.214"
+  CLJRS_VERSION: "0.1.215"
 
 jobs:
   pure-data-tests:
