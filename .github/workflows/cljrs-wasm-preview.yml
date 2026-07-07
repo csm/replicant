@@ -36,6 +36,18 @@ on:
         description: "PR number to (re)deploy a preview for"
         required: true
 
+# The "Comment preview URL on the PR" step needs write access to post/update
+# a comment; without this block it inherits the repo/org default GITHUB_TOKEN
+# permissions, which are read-only in many setups and fail with "Resource not
+# accessible by integration". contents:read is spelled out too since actions/
+# checkout otherwise loses it once any `permissions:` block is present (an
+# explicit block zeroes every unlisted scope rather than layering on top of
+# the default).
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   CLJRS_VERSION: "0.1.219"
 
