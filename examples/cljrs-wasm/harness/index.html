@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replicant on cljrs/WASM -- browser test harness</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header>
+  <h1>Replicant on cljrs/WASM</h1>
+  <p>
+    A real Replicant <code>:rust</code> renderer, compiled through
+    <a href="https://github.com/csm/clojurust">clojurust</a>'s
+    <code>cljrs-wasm</code> browser interpreter, editing this page's actual
+    DOM. See <code>doc/cljrs-port/STATUS.md</code> in the repo for how this
+    works and what it took to get here.
+  </p>
+</header>
+
+<section id="status">Loading cljrs-wasm...</section>
+
+<section>
+  <h2>Automated checks</h2>
+  <p>Runs on page load. This panel is plain text on purpose -- select it and
+     paste it wherever you need it (a bug report, back to an agent, etc).</p>
+  <div id="summary">(not run yet)</div>
+</section>
+
+<section>
+  <h2>Live interactive demo</h2>
+  <p>Click around. Every change here goes through Replicant's reconcile loop
+     and cljrs.dom, editing real DOM nodes -- open devtools and watch.</p>
+  <div id="demo"></div>
+</section>
+
+<section>
+  <h2>Per-check rendered output</h2>
+  <p>What each automated check above actually rendered, for visual
+     cross-checking against its assertion.</p>
+  <div id="test-sandbox"></div>
+</section>
+
+<script type="module">
+  const statusEl = document.getElementById('status');
+  try {
+    const mod = await import('./cljrs_wasm.js');
+    await mod.default();
+    const repl = new mod.Repl();
+    window.__replicantRepl = repl; // handy for poking at from devtools
+
+    async function evalOrThrow(label, source) {
+      const r = await repl.eval(source);
+      if (r.is_error) {
+        throw new Error(`${label}: ${r.result}${r.output ? '\n' + r.output : ''}`);
+      }
+      return r;
+    }
+
+    statusEl.textContent = 'Loading Replicant source...';
+    const replicantSrc = await (await fetch('./replicant.cljrs')).text();
+    await evalOrThrow('loading replicant.cljrs', replicantSrc);
+
+    statusEl.textContent = 'Loading test harness...';
+    const harnessSrc = await (await fetch('./test_harness.cljrs')).text();
+    await evalOrThrow('loading test_harness.cljrs', harnessSrc);
+
+    statusEl.textContent = 'Running checks...';
+    await evalOrThrow('running (harness.tests/init!)', '(harness.tests/init!)');
+
+    // A couple of things cljrs.dom doesn't expose an introspection API for
+    // (namespace-aware element creation in particular) are easiest to check
+    // directly from plain JS, against the real DOM the harness above just
+    // produced -- folded into the same summary panel.
+    const supplementary = [];
+    const svgEl = document.querySelector('#test-sandbox svg');
+    supplementary.push({
+      name: 'SVG element is in the SVG namespace',
+      pass: svgEl?.namespaceURI === 'http://www.w3.org/2000/svg',
+    });
+    const circleEl = document.querySelector('#test-sandbox circle');
+    supplementary.push({
+      name: 'SVG <circle> is in the SVG namespace',
+      pass: circleEl?.namespaceURI === 'http://www.w3.org/2000/svg',
+    });
+
+    // A real click, dispatched by the browser (not by calling a handler
+    // function directly), round-tripping through set-event-handler,
+    // cljrs.dom's listen!, Replicant's dispatch, and back through a
+    // re-render -- then undone, so the live demo below starts fresh.
+    const checkbox = document.getElementById('demo-toggle');
+    const wasChecked = checkbox.checked;
+    checkbox.click();
+    const toggledOnce = checkbox.checked === !wasChecked;
+    checkbox.click();
+    const toggledBack = checkbox.checked === wasChecked;
+    supplementary.push({
+      name: 'a real click event round-trips through Replicant and back to the DOM',
+      pass: toggledOnce && toggledBack,
+    });
+
+    const list = document.createElement('ul');
+    list.className = 'summary-list';
+    for (const { name, pass } of supplementary) {
+      const li = document.createElement('li');
+      li.className = pass ? 'pass' : 'fail';
+      li.textContent = (pass ? 'PASS  ' : 'FAIL  ') + name;
+      list.appendChild(li);
+    }
+    document.getElementById('summary').appendChild(list);
+    const failed = supplementary.filter((s) => !s.pass);
+    if (failed.length) {
+      const h2 = document.getElementById('summary').querySelector('h2');
+      if (h2) h2.classList.add('summary-fail');
+    }
+
+    statusEl.textContent = 'Ready.';
+    statusEl.classList.add('ready');
+  } catch (err) {
+    statusEl.textContent = 'Failed: ' + (err?.message ?? err);
+    statusEl.classList.add('error');
+    console.error(err);
+  }
+</script>
+</body>
+</html>
