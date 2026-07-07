@@ -3,13 +3,13 @@
 // alongside every other currently-open PR's preview, plus a manifest.json +
 // index.html listing them all. Used by .github/workflows/cljrs-wasm-preview.yml.
 //
-// Requires `lftp` on PATH (the workflow installs it via apt).
+// Requires `lftp` and `sshpass` on PATH (the workflow installs both via apt).
 //
 // Environment variables (see the workflow for the corresponding secrets):
 //   PREVIEW_SFTP_HOST          -- required
 //   PREVIEW_SFTP_PORT          -- optional, default 22
 //   PREVIEW_SFTP_USERNAME      -- required
-//   PREVIEW_SFTP_SSH_KEY       -- required, PEM-encoded private key
+//   PREVIEW_SFTP_PASSWORD      -- required
 //   PREVIEW_SFTP_REMOTE_PATH   -- required, base directory on the server
 //   PREVIEW_SITE_BASE_URL      -- required, public URL prefix for the base
 //                                  directory above (used in the PR comment)
@@ -47,15 +47,14 @@ function parseArgs(argv) {
   return args;
 }
 
-function writeKeyFile() {
-  const key = env('PREVIEW_SFTP_SSH_KEY');
-  const keyPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sftp-key-')), 'id');
-  fs.writeFileSync(keyPath, key.endsWith('\n') ? key : key + '\n', { mode: 0o600 });
-  return keyPath;
-}
-
-function lftp(script) {
-  const keyPath = writeKeyFile();
+// Connects with a password rather than a key. lftp's own `-u user,password`
+// only works when lftp was built with its internal SSH2 support, which
+// isn't guaranteed on a given runner image; routing the password through
+// `sshpass -e` (reading it from the SSHPASS environment variable, so it
+// never appears in the script text, argv, or on disk) instead makes lftp
+// shell out to the system `ssh` binary in sftp-subsystem mode, which is the
+// reliable path regardless of how lftp was built.
+function connectPreamble() {
   const host = env('PREVIEW_SFTP_HOST');
   const port = process.env.PREVIEW_SFTP_PORT || '22';
   const user = env('PREVIEW_SFTP_USERNAME');
@@ -63,24 +62,26 @@ function lftp(script) {
   // preview/staging path most setups treat as low-stakes, and pinning a host
   // key adds a secret most users won't bother rotating if the host changes.
   // Harden by setting sftp:connect-program yourself if that matters for you.
-  const preamble = `set sftp:auto-confirm yes
-set sftp:connect-program "ssh -a -x -i ${keyPath} -o StrictHostKeyChecking=accept-new"
+  return `set sftp:auto-confirm yes
+set sftp:connect-program "sshpass -e ssh -a -x -o StrictHostKeyChecking=accept-new"
 open -p ${port} -u ${user}, sftp://${host}
 `;
-  execFileSync('lftp', ['-c', preamble + script], { stdio: 'inherit' });
+}
+
+function lftpEnv() {
+  return { ...process.env, SSHPASS: env('PREVIEW_SFTP_PASSWORD') };
+}
+
+function lftp(script) {
+  execFileSync('lftp', ['-c', connectPreamble() + script], { stdio: 'inherit', env: lftpEnv() });
 }
 
 function tryDownload(remotePath, localPath) {
-  const keyPath = writeKeyFile();
-  const host = env('PREVIEW_SFTP_HOST');
-  const port = process.env.PREVIEW_SFTP_PORT || '22';
-  const user = env('PREVIEW_SFTP_USERNAME');
-  const preamble = `set sftp:auto-confirm yes
-set sftp:connect-program "ssh -a -x -i ${keyPath} -o StrictHostKeyChecking=accept-new"
-open -p ${port} -u ${user}, sftp://${host}
-`;
   try {
-    execFileSync('lftp', ['-c', `${preamble}get ${remotePath} -o ${localPath}`], { stdio: 'pipe' });
+    execFileSync('lftp', ['-c', `${connectPreamble()}get ${remotePath} -o ${localPath}`], {
+      stdio: 'pipe',
+      env: lftpEnv(),
+    });
     return true;
   } catch {
     return false; // remote file doesn't exist yet -- fine on first deploy
@@ -103,6 +104,10 @@ function publishManifestAndIndex(basePath, manifest, workDir) {
   const indexPath = path.join(workDir, 'index.html');
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   fs.writeFileSync(indexPath, renderIndexHtml(manifest));
+  // `mkdir -p` on a directory that already exists logs "Access failed:
+  // Failure" to stderr on at least some lftp versions -- harmless (verified:
+  // the directory is left alone and the subsequent puts still land), just
+  // noisy; lftp doesn't abort the script over it (no `set cmd:fail-exit`).
   lftp(`mkdir -p ${basePath}
 put ${manifestPath} -o ${basePath}/manifest.json
 put ${indexPath} -o ${basePath}/index.html

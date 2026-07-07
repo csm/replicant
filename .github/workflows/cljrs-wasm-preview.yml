@@ -9,7 +9,7 @@ name: cljrs-wasm preview
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   PREVIEW_SFTP_HOST          hostname of the SFTP server
 #   PREVIEW_SFTP_USERNAME      SFTP username
-#   PREVIEW_SFTP_SSH_KEY       PEM-encoded private key for that user
+#   PREVIEW_SFTP_PASSWORD      SFTP password for that user
 #   PREVIEW_SFTP_REMOTE_PATH   base directory on the server to deploy under,
 #                              e.g. /var/www/example.com/replicant-preview
 #   PREVIEW_SITE_BASE_URL      public URL for that same directory, e.g.
@@ -83,8 +83,8 @@ jobs:
             --cljrs-version "${{ env.CLJRS_VERSION }}" \
             --profile release
 
-      - name: Install lftp
-        run: sudo apt-get update && sudo apt-get install -y lftp
+      - name: Install lftp and sshpass
+        run: sudo apt-get update && sudo apt-get install -y lftp sshpass
 
       - name: Deploy preview
         id: deploy
@@ -92,7 +92,7 @@ jobs:
           PREVIEW_SFTP_HOST: ${{ secrets.PREVIEW_SFTP_HOST }}
           PREVIEW_SFTP_PORT: ${{ secrets.PREVIEW_SFTP_PORT }}
           PREVIEW_SFTP_USERNAME: ${{ secrets.PREVIEW_SFTP_USERNAME }}
-          PREVIEW_SFTP_SSH_KEY: ${{ secrets.PREVIEW_SFTP_SSH_KEY }}
+          PREVIEW_SFTP_PASSWORD: ${{ secrets.PREVIEW_SFTP_PASSWORD }}
           PREVIEW_SFTP_REMOTE_PATH: ${{ secrets.PREVIEW_SFTP_REMOTE_PATH }}
           PREVIEW_SITE_BASE_URL: ${{ secrets.PREVIEW_SITE_BASE_URL }}
           # Routed through env, not interpolated into the script text, since
@@ -149,15 +149,15 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install lftp
-        run: sudo apt-get update && sudo apt-get install -y lftp
+      - name: Install lftp and sshpass
+        run: sudo apt-get update && sudo apt-get install -y lftp sshpass
 
       - name: Remove preview
         env:
           PREVIEW_SFTP_HOST: ${{ secrets.PREVIEW_SFTP_HOST }}
           PREVIEW_SFTP_PORT: ${{ secrets.PREVIEW_SFTP_PORT }}
           PREVIEW_SFTP_USERNAME: ${{ secrets.PREVIEW_SFTP_USERNAME }}
-          PREVIEW_SFTP_SSH_KEY: ${{ secrets.PREVIEW_SFTP_SSH_KEY }}
+          PREVIEW_SFTP_PASSWORD: ${{ secrets.PREVIEW_SFTP_PASSWORD }}
           PREVIEW_SFTP_REMOTE_PATH: ${{ secrets.PREVIEW_SFTP_REMOTE_PATH }}
           PREVIEW_SITE_BASE_URL: ${{ secrets.PREVIEW_SITE_BASE_URL }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
